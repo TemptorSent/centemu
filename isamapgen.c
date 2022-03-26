@@ -21,21 +21,17 @@ struct centamode {
 
 };
 
-void print_ins(unsigned char i);
-unsigned char print_mnemonic(unsigned char i);
-unsigned char print_amode(unsigned char i, unsigned char l, unsigned char m);
-unsigned char print_branch(unsigned char i, unsigned char t);	
-unsigned char print_alu(unsigned char i, unsigned char t);
+static char* mn_misc[]={"hlt","nop","f2?","f3?","f4?","f5?","f6?","fcc","f8?","ret","u?a","u?b","u?c","u?d","dly","u?f",0};
+static char* mn_b[]={"bcs","bcc","bss","bsc","bzs","bzc","blt","bge","bgt","ble","bxs0","bxs1","bxs2","bxs3","b??0","b??1",0};
+static char* mn_alub[]={"addb","subb","andb","orb","alu4b","alu5b","alu6b","alu7b",0};
+static char* mn_aluw[]={"addw","subw","andw","orw","alu4w","alu5w","alu6w","alu7w",0};
+static char* mn_jc[]={"jump","call",0};
+static char* mn_ldst[]={"stxb","stxw","ldxb","ldxw","styb","styw","ldyb","ldyw",0};
+static char* unknown="????";
 
-int main() {
-	unsigned int i,h,l;
-	for(i=0; i<=0xff; i++) {
-		print_ins((unsigned char)(i&0xff));
-	}
-	return(0);
-}
-
-int parse_opcode(uint8_t op) {
+char *parse_opcode(uint8_t op) {
+	char *mn;
+	unsigned char argb=0;
 	switch( op >> 4 ) {
 		case 0xf:
 		case 0xe:
@@ -45,229 +41,44 @@ int parse_opcode(uint8_t op) {
 		case 0xa:
 		case 0x9:
 		case 0x8:
-			parse_memop( op & 0x7f );
+			mn=mn_ldst[(op&0x70)>>4];
+			argb=(op&0x08)?0:(op&0x07)>2?1:(op&0x03)?2:(op&0x10)?2:1;
 			break;
 		case 0x7:
-			parse_jmpcall( op & 0x0f );
+			mn=mn_jc[(op&0x08)>>3];
+			argb=(op&0x07)>3?1:2;
 			break;
 		case 0x6:
-			parse_unknown( op );
-			break;
-		case 0x4:
-			parse_alu( op & 0x0f );
-			break;
-		case 0x3:
-		case 0x2:
-			parse_unknown( op );
-			break;
-		case 0x1:
-			parse_branch( op & 0x0f);
-			break;
-		case 0x0;
-			parse_special( op & 0x0f );
-			break;
-}
-
-static char *memop_types[] = {"store","load"};
-static char *dirs[] = {"byte","word"};
-static char *accs[] = {"A", "B"};
-
-int parse_memop( uint8_t op ) {
-	uint8_t typelen=( op & 0x10 ) >> 4; 
-	uint8_t dir=( op & 0x20 ) >> 5;
-	uint8_t acc=( op & 0x60 ) >> 6;
-
-
-	if(i&0x80) {
-		i&0x20?printf("ld"):printf("st");
-		i&0x10?printf("w"):printf("b");
-		i&0x40?printf(" B, "):printf(" A, ");
-		argb=print_amode(i&0x7,i&0x10?2:1,1);
-		printf("\t");
-		i&0x20?printf("load "):printf("store ");
-		i&0x10?printf("word "):printf("byte ");
-		i&0x40?printf("to accumulator B "):printf("to accumulator A ");
-		print_amode(i&0x7,i&0x10?2:1,0);
-	}
-	return(argb);
-}
-
-void print_ins(unsigned char i) {
-	unsigned char argb=0;
-	unsigned int h,l;
-	h=1000*(i>>7 & 1)+100*(i>>6 & 1)+10*(i>>5 & 1)+(i>>4 & 1);
-	l=1000*(i>>3 & 1)+100*(i>>2 & 1)+10*(i>>1 & 1)+(i & 1);
-	printf("0x%02hhx\t%04u %04u\t", i,h,l);
-	argb=print_mnemonic(i);
-	printf("\t:%u\n",argb);
-	return;
-}
-
-unsigned char print_mnemonic(unsigned char i) {
-	unsigned char argb=0;
-	/* Utility functions */
-	if((i&0xf0) == 0x00) {
-		if(i == 0x00) {
-			printf("hlt\thalt execution");
-		} else if (i==0x01) {
-			printf("nop\tno-op");
-		} else if (i<0x9) {
-			/* Flag bits */
-			switch(i&0x0f) {
-				case 0x07:
-					printf("fcc\tclear carry flag");
-					break;
-				default:
-					printf("f%u\tflag%u",i-0x02, i-0x02);
-			}
-		} else if (i==0x9) {
-			printf("ret\treturn from subroutine");
-		} else if (i==0x0e) {
-			printf("dly\tdelay 4.5ms");
-		}	
-	}
-
-	/* conditional branch instructions */
-	if((i&0xf0) == 0x10) {
-		argb=1;
-		printf("b");
-		argb=print_branch(i&0xf,1);
-		printf(" PC+<exp>\trelative branch if ");
-		print_branch(i&0xf,0);
-
-	}
-
-	/* ALU instructions */
-	if((i&0xe0) == 0x40) {
-		argb=(i&0x08)?1:0;
-		print_alu(i&0x7,1);
-		argb?printf(" r<exp:4-7>, r<exp:0-3>\t"):printf(" B, A\t");
-		print_alu(i&0x7,0);
-		argb?printf(" register <high nibble of exp> "):printf(" accumulator B ");
-		if((i&0x7)==0) { printf("to"); }
-		else if((i&0x7==1)) { printf("from"); }
-		else { printf("with");}
-
-		argb?printf(" register <low nibble of exp> "):printf(" accumulator A ");
-	}
-
-	/* jump/call instructions) */
-	if((i&0xf0) == 0x70) {
-		i&0x08?printf("call"):printf("jump");
-		printf(" ");
-		argb=print_amode(i&0x7,1,1);
-		printf("\t");
-		print_amode(i&0x7,1,0);
-		i&0x08?printf(" call"):printf(" jump");
-	}
-
-	/* load/store instructions */
-	if(i&0x80) {
-		i&0x20?printf("ld"):printf("st");
-		i&0x10?printf("w"):printf("b");
-		i&0x40?printf(" B, "):printf(" A, ");
-		argb=print_amode(i&0x7,i&0x10?2:1,1);
-		printf("\t");
-		i&0x20?printf("load "):printf("store ");
-		i&0x10?printf("word "):printf("byte ");
-		i&0x40?printf("to accumulator B "):printf("to accumulator A ");
-		print_amode(i&0x7,i&0x10?2:1,0);
-	}
-	return(argb);
-}
-
-/* pass three bit address mode m, data length l, and output type t (0/1) */
-unsigned char print_amode(unsigned char m, unsigned char l, unsigned char t) {
-	unsigned char argb=1;
-	switch(m) {
-		case 0x0:
-			t?printf("#<exp>"):printf("immediate");
-			argb=l;
-			break;
-		case 0x1:
-			t?printf("<exp>"):printf("direct");
-			argb=2;
-			break;
-		case 0x2:
-			t?printf("[<exp>]"):printf("indirect");
-			argb=2;
-			break;
-		case 0x3:
-			t?printf("PC+<exp>"):printf("relative");
-			break;
-		case 0x4:
-			printf("??");
+			mn=unknown;
 			break;
 		case 0x5:
-			printf("??");
-			break;
-		case 0x6:
-			printf("??");
-			break;
-		case 0x7:
-			printf("??");
-			break;
-	}
-	return(argb);
-}
-
-unsigned char print_branch(unsigned char i, unsigned char t) {
-	unsigned char argb=1;
-	switch(i&0xf) {
-		case 0x0:
-			t?printf("cs"):printf("carry flag set");
-			break;
-		case 0x1:
-			t?printf("cc"):printf("carry flag clear");
+			mn=mn_aluw[(op&0x07)];
+			argb=(op&0x08)?1:0;
 			break;
 		case 0x4:
-			t?printf("z"):printf("zero flag set");
-			break;
-		case 0x5:
-			t?printf("nz"):printf("zero flag clear");
-			break;
-		case 0x6:
-			t?printf("lt"):printf("less than");
-			break;
-		case 0x7:
-			t?printf("ge"):printf("greater than or equal");
-			break;
-		case 0x8:
-			t?printf("gt"):printf("greater than");
-			break;
-		case 0x9:
-			t?printf("le"):printf("less than or equal");
-			break;
-		case 0xa:
-		case 0xb:
-		case 0xc:
-		case 0xd:
-			t?printf("xs%u",(i&0x07)-0x2):printf("external sense %u",(i&0x07)-0x2);
-			break;
-		default:
-			printf("??");
-			break;
-	}
-	return(argb);
-}
-
-unsigned char print_alu(unsigned char i, unsigned char t) {
-	switch(i&0x7) {
-		case 0x0:
-			printf("add");
-			break;
-		case 0x1:
-			t?printf("sub"):printf("subtract");
-			break;
-		case 0x2:
-			printf("and");
+			mn=mn_alub[(op&0x07)];
+			argb=(op&0x08)?1:0;
 			break;
 		case 0x3:
-			printf("or");
+		case 0x2:
+			mn=unknown;
 			break;
-		default:
-			printf("??");
+		case 0x1:
+			mn=mn_b[(op&0x0f)];
+			argb=1;
+			break;
+		case 0x0:
+			mn=mn_misc[(op&0x0f)];
+			argb=0;
 			break;
 	}
-	return(1);
+	return(mn);
+}
+
+int main() {
+	unsigned int i,h,l;
+	for(i=0; i<=0xff; i++) {
+		printf("0x%0x\t%s\n", i, parse_opcode(i));
+	}
+	return(0);
 }

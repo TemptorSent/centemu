@@ -154,11 +154,17 @@ unsigned char print_branch(unsigned char i, unsigned char t) {
 		case 0x1:
 			t?printf("cc"):printf("carry flag clear");
 			break;
+		case 0x2:
+			t?printf("ss"):printf("carry flag set");
+			break;
+		case 0x3:
+			t?printf("sc"):printf("carry flag clear");
+			break;
 		case 0x4:
-			t?printf("z"):printf("zero flag set");
+			t?printf("zs"):printf("zero flag set");
 			break;
 		case 0x5:
-			t?printf("nz"):printf("zero flag clear");
+			t?printf("zc"):printf("zero flag clear");
 			break;
 		case 0x6:
 			t?printf("lt"):printf("less than");
