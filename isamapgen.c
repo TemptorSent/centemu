@@ -34,8 +34,8 @@ static char* unknown="????";
 char * mn_list[0x10][0x10]={
 	{"hlt","nop","f2?","f3?","f4?","f5?","f6?","fcc","f8?","ret","u?a","u?b","u?c","u?d","dly","u?f"},
 	{"bcs","bcc","bss","bsc","bzs","bzc","blt","bge","bgt","ble","bxs0","bxs1","bxs2","bxs3","b??0","b??1"},
-	{"incb","decb","clrb","negb","lsrb","lslb","rorb","rolb", 0,0,0,0, 0,0,0,0},
-	{"incw","decw","clrw","negw","lsrw","lslw","rorw","rolw", 0,0,0,0, 0,0,0,0},
+	{"incb","decb","clrb","notb","lsrb","lslb","rrcb","rlcb", 0,0,0,0, 0,0,0,0},
+	{"incw","decw","clrw","notw","lsrw","lslw","rrcw","rlcw", 0,0,0,0, 0,0,0,0},
 	{"addb!","subb!","andb!","orb!","alu4b!","alu5b!","alu6b!","alu7b!","addb","subb","andb","orb","alu4b","alu5b","alu6b","alu7b"},
 	{"addw!","subw!","andw!","orw!","alu4w!","alu5w!","alu6w!","alu7w!","addw","subw","andw","orw","alu4w","alu5w","alu6w","alu7w"},
 	{"stzw","ldzw",0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0},
