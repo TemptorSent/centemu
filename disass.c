@@ -63,7 +63,7 @@ static stem mns_alubi={"",WB,AALU,{
 	{"xor",0x44,0x18},{"mov",0x45,0x18},{"alu0x6",0x46,0x18},{"alu0x7",0x47,0x18},{0,0,0}
 }};
 static stem mns_misc={"",N,ANONE,{
-	{"hlt",0x00,0x00},{"nop",0x01,0x00},{"dly",0x0e,0x01},
+	{"hlt",0x00,0x00},{"nop",0x01,0x00},{"dly",0x0e,0x00},
 	{"0x0c",0x0c,0x00},{"0x0d",0x0d,0x00},{"?0x0f",0x0f,0x00},{0,0,0}
 }};
 static stem *mn_stems[]= {
@@ -114,7 +114,7 @@ char * mn_list[0x10][0x10]={
 };
 
 static char *am_mem_list[0x10] = {"#D","A","[A]","PC+N","[PC+N]","_[R]_","?R?","?R?","R0","R1","R2","R3","R4","R5","R6","R7"};
-static char *am_alu_list[0x02] = {"!","R,R"};
+static char *am_alu_list[0x02] = {"R,R", "!"};
 static char *am_rel[0x01] = {"PC+N"};
 static char *am_none[0x01] = {""};
 
@@ -126,7 +126,7 @@ typedef struct amfam {
 
 static amfam amfam_none={0x00,0,{""}};
 static amfam amfam_rel={0x00,0,{"PC+N"}};
-static amfam amfam_alu={0x08,3,{"!","R,R"}};
+static amfam amfam_alu={0x08,3,{"R,R","!"}};
 static amfam amfam_mem={0x0f,0,{"#D","A","[A]","PC+N","[PC+N]","_[R]_","?R?","?R?","R0","R1","R2","R3","R4","R5","R6","R7"}};
 amfam *amfams[]={&amfam_none,&amfam_rel,&amfam_alu,&amfam_mem};
 
