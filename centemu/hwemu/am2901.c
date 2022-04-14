@@ -218,10 +218,11 @@ typedef struct alu_input_t {
 int main() {
 	am2901_device_t d0a={}, d1a={};
 	am2901_device_t *alu0, *alu1;
-	uint8_t din0=0xc, dout0, P_0, G_0, OVR0, FZ0, FS0;
-	uint8_t din1=0x5, dout1, P_1, G_1, OVR1, FZ1, FS1;
-	uint8_t RAM0,RAM3,RAM7, Q0,Q3,Q7, C0,C3,C7;
+	uint8_t din0=0xc, dout0, P_0, G_0, OVR0, FS0;
+	uint8_t din1=0x5, dout1, P_1, G_1, OVR1, FS1;
+	uint8_t RAM0,RAM3,RAM7, Q0,Q3,Q7, C0,C4,C8;
 	uint8_t	aluA=0x0, aluB=0x0, OE_=0, Dout;
+	uint8_t FZ, FN, FC, FV;
 	enum am2901_alu_source_operand_code I210;
 	enum am2901_alu_function_code I543;
 	enum am2901_alu_destination_code I876;
@@ -253,12 +254,12 @@ int main() {
 
 	alu0->D=&din0;
 	alu0->Cn=&C0;
-	alu0->Co=&C3;
+	alu0->Co=&C4;
 	alu0->Y=&dout0;
 	alu0->P_=&P_0;
 	alu0->G_=&G_0;
 	alu0->OVR=&OVR0;
-	alu0->FZ=&FZ0;
+	alu0->FZ=&FZ;
 	alu0->F3=&FS0;
 	alu0->RAM0=&RAM0;
 	alu0->RAM3=&RAM3;
@@ -267,13 +268,13 @@ int main() {
 
 	alu1->D=&din1;
 	alu1->Y=&dout1;
-	alu1->Cn=&C3;
-	alu1->Co=&C7;
+	alu1->Cn=&C4;
+	alu1->Co=&FC;
 	alu1->P_=&P_1;
 	alu1->G_=&G_1;
-	alu1->OVR=&OVR1;
-	alu1->FZ=&FZ1;
-	alu1->F3=&FS1;
+	alu1->OVR=&FV;
+	alu1->FZ=&FZ;
+	alu1->F3=&FN;
 	alu1->RAM0=&RAM3;
 	alu1->RAM3=&RAM7;
 	alu1->Q0=&Q3;
@@ -281,13 +282,15 @@ int main() {
 
 
 	for(int i=0; i<4; i++) {
+		/* Pull the Zero flag high (open collector output) */
+		FZ=1;
+
 		I210=prog[i].I210;
 		I543=prog[i].I543;
 		I876=prog[i].I876;
 
 		aluA=prog[i].ADDR_A;
 		aluB=prog[i].ADDR_B;
-
 		C0=prog[i].Cin;
 
 		din0=prog[i].Din&0x0f;
@@ -314,7 +317,7 @@ int main() {
 		am2901_update(alu1);
 		Dout=dout1<<4|dout0;
 		
-		printf("%x\n", Dout);
+		printf("%x  Flags: %c%c%c%c \n", Dout,FC?'Z':' ',FV?'V':' ',FN?'N':' ',FZ?'Z':' ');
 		printf(
 			"A[%x]:%x %x  B[%x]:%x %x\n\n",
 			aluA, alu1->RAM[aluA], alu0->RAM[aluA],
