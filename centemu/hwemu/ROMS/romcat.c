@@ -12,6 +12,15 @@ uint8_t mergedrom[ROMSIZE][NUMROMS];
 uint64_t iws[ROMSIZE];
 //char iws_binarytext[ROMSIZE][NUMROMS*10];
 static char *ROM_files[NUMROMS] = {
+	"CPU_5.rom", /* MWK3.11 - A3.11 */
+	"CPU_2.rom", /* MWF3.11 - B3.11 */
+	"CPU_3.rom", /* MWH3.11 - C3.11 */
+	"CPU_6.rom", /* MWL3.11 - D3.11 */
+	"CPU_7.rom", /* MWM3.11 - E3.11 */
+	"CPU_4.rom", /* MWJ3.11 - F3.11 */
+	"CPU_1.rom"  /* MWE3.11 - ??3.11 */
+};
+/*static char *ROM_files[NUMROMS] = {
 	"CPU_1.rom",
 	"CPU_2.rom",
 	"CPU_3.rom",
@@ -20,7 +29,7 @@ static char *ROM_files[NUMROMS] = {
 	"CPU_6.rom",
 	"CPU_7.rom"
 };
-
+*/
 uint64_t concat_bytes(uint8_t bytes[]){
 	uint64_t out=0,in;
 	for(int i=0;i<NUMROMS;i++) {
@@ -132,8 +141,8 @@ int main() {
 		printf("\n%04x",i);
 		int64_bits_to_binary_string(binstr, iws[i], NUMROMS*8,4);
 		printf(" %#016"PRIx64" %s",iws[i],binstr);
-		printf(" 2901H: I=%03o",BITRANGE(iws[i],34,9));
-		printf(" 2909H: FE_PUP=%01o",BITRANGE_R(iws[i],12,2));
+		printf(" 2901H: I=%03o",BITRANGE(iws[i],10,9));
+		printf(" 2909H: FE_PUP=%01o",BITRANGE_R(iws[i],28,2));
 	}
 	tmp=0xfc18;
 	salad=0xfedcba9765843210LL;
