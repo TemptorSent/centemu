@@ -135,8 +135,8 @@ int main() {
 		printf(" 2901H: I=%03o",BITRANGE(iws[i],34,9));
 		printf(" 2909H: FE_PUP=%01o",BITRANGE_R(iws[i],12,2));
 	}
-	tmp=0x0840;
-	salad=0x0000000000f000000LL;
+	tmp=0xfc18;
+	salad=0xfedcba9765843210LL;
 
 	printf("\n\nbitsald tossing:\n%04x -%llx> %04x\n",tmp,salad,bitsalad_16(salad,tmp));
 
