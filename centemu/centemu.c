@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <ctype.h>
 
 #define swap_bytes(n) (((((uint16_t)(n) & 0xFF)) << 8) | (((uint16_t)(n) & 0xFF00) >> 8))
 
@@ -36,7 +37,7 @@ typedef union regset_t {
 		int8_t R0,R1, R2,R3, R4,R5, R6,R7, R8,R9, RA,RB, RC,RD, RE,RF;	
 	};
 	struct {
-		int16_t X,Y,Z,U,W,SP,ST,PC;
+		int16_t A,B,X,Y,Z,S,F,PC;
 	};
 } regset_t;
 
@@ -47,7 +48,7 @@ typedef union regmem_t {
 } regmem_t;
 
 typedef union memmap_t {
-	int8_t a[0x10000];
+	uint8_t a[0x10000];
 	struct {
 		regmem_t r; /* 0x0000 - 0x00ff */
 		int8_t user[0xefff-0x00ff]; /* 0x0100 - 0xeffff */
@@ -84,19 +85,20 @@ static inst_base_t ib_call={"call",OT_FLOW_CALL,DS_N,AMEM,{{"",0x78,0x07},{0,0,0
 static inst_base_t ib_reti={"reti",OT_SYS,DS_N,ANONE,{{"",0x0a,0x00},{0,0,0}}};
 static inst_base_t ib_ret={"ret",OT_SYS,DS_N,ANONE,{{"",0x09,0x00},{0,0,0}}};
 
-static inst_base_t ib_ldz={"ldz",OT_LOAD,DS_W,AMEM,{{"",0x68,0x07},{0,0,0}}};
+static inst_base_t ib_ldz={"st",OT_LOAD,DS_W,AMEM,{{"x",0x68,0x07},{0,0,0}}};
 
-static inst_base_t ib_stz={"stz",OT_STORE,DS_W,AMEM,{{"",0x60,0x07},{0,0,0}}};
+static inst_base_t ib_stz={"ld",OT_STORE,DS_W,AMEM,{{"x",0x60,0x07},{0,0,0}}};
 
-static inst_base_t ib_ld={"ld",OT_LOAD,DS_WB,AMEM,{{"x",0xa0,0x1f},{"y",0xe0,0x1f},{0,0,0}}};
+static inst_base_t ib_ld={"st",OT_LOAD,DS_WB,AMEM,{{"a",0xa0,0x1f},{"b",0xe0,0x1f},{0,0,0}}};
 
-static inst_base_t ib_st={"st",OT_STORE,DS_WB,AMEM,{{"x",0x80,0x1f},{"y",0xc0,0x1f},{0,0,0}}};
+static inst_base_t ib_st={"ld",OT_STORE,DS_WB,AMEM,{{"a",0x80,0x1f},{"b",0xc0,0x1f},{0,0,0}}};
 
 static inst_base_t ib_aluls={"ls",OT_ALU1,DS_WB,AALU,{{"l",0x24,0x18},{"r",0x25,0x18},{0,0,0}}};
 
 static inst_base_t ib_alur={"rc",OT_ALU1,DS_WB,AALU,{{"r",0x26,0x18},{"l",0x27,0x18},{0,0,0}}};
 
 static inst_base_t ib_f={"f",OT_SYS,DS_BIT,ANONE,{{"s",0x02,0x1},{"i",0x04,0x01},{"c",0x06,0x01},{"ac",0x08,0x00},{0,0,0}}};
+static inst_base_t ib_fac={"fac",OT_SYS,DS_N,ANONE,{{"",0x08,0x00},{0,0,0}}};
 
 static inst_base_t ib_bf={"b",OT_FLOW_COND,DS_BIT,AREL,{
 	{"c",0x10,0x1},{"s",0x12,0x01},{"z",0x14,0x01},{0,0,0}
@@ -132,6 +134,7 @@ static inst_base_t *inst_bases[]= {
 	&ib_aluls,
 	&ib_alur,
 	&ib_f,
+	&ib_fac,
 	&ib_bf,
 	&ib_b,
 	&ib_alumisc,
@@ -143,10 +146,10 @@ static inst_base_t *inst_bases[]= {
 
 
 /* Active program counter */
-uint16_t PC;
+volatile uint16_t PC;
 
 uint8_t halted=1;
-uint8_t sense[4];
+uint8_t sense[4]={0,0,0,0};
 
 #define NUMBANKS 2
 uint8_t ilevel=0;
@@ -196,7 +199,7 @@ void usermem_writeb(uint16_t dst, uint8_t val) {
 
 /* This will get special handling later */
 uint8_t mmio_readb(uint16_t src) {
-	return(0xff);
+	return(mem->a[src]);
 }
 
 /* This will get special handling later */
@@ -312,7 +315,7 @@ enum alu_ops2 {
 };
 
 /* Handle byte size single register ALU instructions */
-void alu_op1argb(uint8_t op, uint8_t reg, uint8_t opt) {
+void alu_op1regb(uint8_t op, uint8_t reg, uint8_t opt) {
 	uint8_t arg,res;
 	uint16_t tmp;
 	/* Read argument byte from specified register */
@@ -321,7 +324,7 @@ void alu_op1argb(uint8_t op, uint8_t reg, uint8_t opt) {
 		case ALU_INC: res=arg+(1+opt); status.V=(res<arg)?1:0; break;
 		case ALU_DEC: res=arg-(1+opt); status.V=(res>arg)?1:0; break;
 		case ALU_CLR: res=0; break;
-		case ALU_NOT: res=~res; break;
+		case ALU_NOT: res=~arg; break;
 		case ALU_LSL: res=arg<<(1+opt); status.C=((arg<<opt)&0x80)?1:0; break;
 		case ALU_LSR: res=arg>>(1+opt); status.C=((arg>>opt))?1:0; break;
 		case ALU_RCL: /* Dup arg bits, shift up, take the high word and shift back down */
@@ -341,7 +344,7 @@ void alu_op1argb(uint8_t op, uint8_t reg, uint8_t opt) {
 }
 
 /* Handle word size single register ALU instructions */
-void alu_op1argw(uint8_t op, uint8_t reg, uint8_t opt) {
+void alu_op1regw(uint8_t op, uint8_t reg, uint8_t opt) {
 	uint16_t arg,res;
 	uint32_t tmp;
 	/* Read argument byte from specified register */
@@ -369,48 +372,13 @@ void alu_op1argw(uint8_t op, uint8_t reg, uint8_t opt) {
 	return;
 }
 
-/* Handle byte size two register ALU instructions */
-void alu_op2regb(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
-	uint16_t srcarg,dstarg,res;
-	uint32_t tmp;
-	/* Read argument bytes from specified registers */
-	srcarg=reg_readb(srcreg);
-	dstarg=reg_readb(dstreg);
-
-	switch(op&0x0f) {
-		case ALU_ADD:
-			tmp=dstarg+srcarg;
-			res=dstarg+srcarg;
-			status.C=(tmp&0x00010000)?1:0;
-			status.V=(~((srcarg&0x8000)^(dstarg&0x8000)) & ((res&0x8000)^(srcarg&0x8000)))?1:0;
-			break;
-		case ALU_SUB:
-			tmp=dstarg-srcarg;
-			res=dstarg-srcarg;
-			status.C=(tmp&0x00010000)?1:0;
-			status.V=(~((res&0x8000)^(dstarg&0x8000)) & ((dstarg&0x8000)^(srcarg&0x8000)))?1:0;
-			break;
-		case ALU_AND: res=dstarg&srcarg; break;
-		case ALU_OR: res=dstarg|srcarg; break;
-		case ALU_XOR: res=dstarg^srcarg; break;
-		case ALU_MOV: res=srcarg; break;
-		default: break;
-	}
-	/* Set zero and minus flags appropriately*/
-	status.Z=res?0:1;
-	status.M=(res&0x8000)?1:0;
-	 
-	reg_writeb(dstreg,res);
-	return;
-}
-
 /* Handle word size two register ALU instructions */
-void alu_op2regw(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
+void alu_op2regb(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
 	uint8_t srcarg,dstarg,res;
 	uint16_t tmp;
 	/* Read argument words from specified registers */
-	srcarg=reg_readw(srcreg);
-	dstarg=reg_readw(dstreg);
+	srcarg=reg_readb(srcreg);
+	dstarg=reg_readb(dstreg);
 
 	switch(op&0x0f) {
 		case ALU_ADD:
@@ -435,9 +403,45 @@ void alu_op2regw(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
 	status.Z=res?0:1;
 	status.M=(res&0x80)?1:0;
 	 
+	reg_writeb(dstreg,res);
+	return;
+}
+
+/* Handle byte size two register ALU instructions */
+void alu_op2regw(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
+	uint16_t srcarg,dstarg,res;
+	uint32_t tmp;
+	/* Read argument bytes from specified registers */
+	srcarg=reg_readw(srcreg);
+	dstarg=reg_readw(dstreg);
+
+	switch(op&0x0f) {
+		case ALU_ADD:
+			tmp=dstarg+srcarg;
+			res=dstarg+srcarg;
+			status.C=(tmp&0x00010000)?1:0;
+			status.V=(~((srcarg&0x8000)^(dstarg&0x8000)) & ((res&0x8000)^(srcarg&0x8000)))?1:0;
+			break;
+		case ALU_SUB:
+			tmp=dstarg-srcarg;
+			res=dstarg-srcarg;
+			status.C=(tmp&0x00010000)?1:0;
+			status.V=(~((res&0x8000)^(dstarg&0x8000)) & ((dstarg&0x8000)^(srcarg&0x8000)))?1:0;
+			break;
+		case ALU_AND: res=dstarg&srcarg; break;
+		case ALU_OR: res=dstarg|srcarg; break;
+		case ALU_XOR: res=dstarg^srcarg; break;
+		case ALU_MOV: res=srcarg; break;
+		default: break;
+	}
+	/* Set zero and minus flags appropriately*/
+	status.Z=res?0:1;
+	status.M=(res&0x8000)?1:0;
+	 
 	reg_writew(dstreg,res);
 	return;
 }
+
 
 
 
@@ -526,18 +530,22 @@ void flow_cond_rel(uint8_t op, int8_t offset) {
 			case BCOND_XS1:
 			case BCOND_XS2:
 			case BCOND_XS3:
-			       	res=(sense[op&0x3])?0:1; break;
+			       	res=(sense[op&0x3])?1:0; break;
 			default: break;
 		}
 	}
 	/* If the result is true, add the specified offset to the PC */
-	if(res){PC=(uint16_t)(PC+offset);}
+	if(res){
+		PC=(uint16_t)(PC+(int8_t)offset);
+		printf("\n Jumping to %04x\n",PC);
+	}
 	return;
 }
 
 /* Unconditional branch instructions */
 void flow_jump(uint16_t dst) {
 	PC=dst;
+	printf("\n Jumping to %04x\n",PC);
 	return;
 }
 
@@ -558,11 +566,11 @@ typedef struct amode_type_t {
 
 static amode_type_t amode_type_none={0x00,0,{""}};
 
-static amode_type_t amode_type_rel={0x00,0,{"PC+N"}};
+static amode_type_t amode_type_rel={0x00,0,{"PC+O"}};
 
 static amode_type_t amode_type_alu={0x08,3,{"R,R","!"}};
 
-static amode_type_t amode_type_mem={0x0f,0,{"#D","A","[A]","PC+N","[PC+N]","_[R]_","?R?","?R?","R0","R1","R2","R3","R4","R5","R6","R7"}};
+static amode_type_t amode_type_mem={0x0f,0,{"#D","M","[M]","PC+O","[PC+O]","_[R]_","?R?","?R?","R0","R1","R2","R3","R4","R5","R6","R7"}};
 
 amode_type_t *amode_types[]={&amode_type_none,&amode_type_rel,&amode_type_alu,&amode_type_mem};
 
@@ -573,49 +581,197 @@ char *mn_flag_mods[]={"s","c"};
 typedef struct cinst_t {
 	uint16_t address;
 	uint8_t opcode; /* op code */
-	uint8_t args[2]; /* argument bytes, if given */
-	uint8_t argc; /* number of arguments */
+	union {
+		uint8_t args[2]; /* argument bytes, if given */
+		uint16_t argw;
+	};
+	uint8_t argc; /* number of argument bytes */
 	uint8_t op_type; /* Operation handler type */
 	uint8_t data_type; /* none = 0, byte = 1, word = 2 */
 	uint8_t amode_type; /* Addressing mode type */
 	uint8_t amode; /* Addressing mode */
+	uint8_t idxmode; /* Autoindex mode (pre/post inc/dec) */
+	uint8_t indirects; /* Number of levels of indirection */
+	uint8_t dsttype; /* 0 - register/NA, 1 - memory address */
+	uint8_t dstreg; /* Destination register */
+	uint16_t dstaddr; /* Destination address */
+	uint8_t srctype; /* 0 - register/NA, 1 - memory address */
+	uint8_t srcreg; /* Source register */
+	uint16_t srcaddr; /* Source address */
+	uint16_t value; /* Argument value */
+	int8_t offset; /* Relative offset */
 	char mnemonic[8]; /* assembly mnemonic */
 } cinst_t;
 cinst_t cinst;
 
-uint8_t get_amode_argc(uint8_t amode, uint8_t amode_type, uint8_t data_size) {
-	switch(amode_type) {
+typedef struct amode_t {
+	char *desc;
+	char *fmt;
+	char indirects;
+	char type;
+} amode_t;
+
+enum amode_mem_modes { IMMEDIATE, MEM_DIRECT, MEM_INDIRECT, PCREL_DIRECT, PCREL_INDIRECT, REG_INDIRECT_AUTOIDX,
+	IMP_REG_A_INDIRECT, IMP_REG_B_INDIRECT, IMP_REG_X_INDIRECT, IMP_REG_Y_INDIRECT, IMP_REG_Z_INDIRECT,
+	IMP_REG_S_INDIRECT, IMP_REG_F_INDIRECT, IMP_REG_PC_INDIRECT};
+static amode_t amodes_mem[]={
+	{"immediate", "#D",0,0},
+	{"memory direct", "M",1,1},
+	{"memory indirect", "(M)",2,1},
+	{"PC relative direct", "PC+O",1,1},
+	{"PC relative indirect", "(PC+O)",2,1},
+	{"register indirect autoinc", "(R)+",2,0},
+	{"unknown mode 0x6", "U6",0,0},
+	{"unknown mode 0x7", "U7",0,0},
+	{"implicit register A indirect", "(A)",2,0},
+	{"implicit register B indirect", "(B)",2,0},
+	{"implicit register X indirect", "(X)",2,0},
+	{"implicit register Y indirect", "(Y)",2,0},
+	{"implicit register Z indirect", "(Z)",2,0},
+	{"implicit register S indirect", "(S)",2,0},
+	{"implicit register F indirect", "(F)",2,0},
+	{"implicit register PC indirect", "(PC)",2,0}
+};
+
+/* Indirection level: 0=immediate,1=direct,2+=indirect
+ * Source type: 0=register, 1=address */
+
+uint8_t get_valueb(uint8_t indirects, uint8_t srctype, uint16_t src) {
+	/* Special case register direct where we only want to read and return a byte from the reg */
+	if(indirects==1&&!srctype){ return(reg_readb(src&0xf)); }
+	while(indirects--){
+		if(srctype++) { src=( (mem_readb(src)<<8) + mem_readb(src+1) ); }
+		else { src=reg_readw((src&0xf)); }
+	}
+	return(src&0xff);
+}
+
+uint16_t get_valuew(uint8_t indirects, uint8_t srctype, uint16_t src) {
+	printf("Getting word value: indirects=%u, srctype=%u, src=%#06x\n",indirects,srctype,src);
+	while(indirects--){
+		if(srctype++) { src=( (mem_readb(src)<<8) + mem_readb(src+1) ); }
+		else { src=reg_readw((src&0xf)); }
+		printf("        word value: indirects=%u, srctype=%u, src=%#06x\n",indirects,srctype,src);
+	}
+	return(src);
+}
+
+void put_valueb(uint8_t indirects, uint8_t dsttype, uint16_t dst, uint8_t val) {
+	/* Special case register direct where we only want to store a byte to the reg */
+	if(indirects==1&&!dsttype){ return(reg_writeb(dst&0xf, val)); }
+	while(indirects--){
+		if(dsttype++) { dst=( (mem_readb(dst)<<8) + mem_readb(dst+1) ); }
+		else { dst=reg_readw((dst&0xf)); }
+	}
+	mem_writeb(dst,val);
+	return;
+}
+
+void put_valuew(uint8_t indirects, uint8_t dsttype, uint16_t dst, uint16_t val) {
+	/* Special case register direct where we only want to store a word to the reg */
+	if(indirects==1&&!dsttype){ return(reg_writew(dst&0xf, val)); }
+	while(indirects--){
+		if(dsttype++) { dst=( (mem_readb(dst)<<8) + mem_readb(dst+1) ); }
+		else { dst=reg_readw((dst&0xf)); }
+	}
+	mem_writeb(dst,(val&0xff00)>>8);
+	mem_writeb(dst+1,(val&0x00ff));
+	return;
+}
+
+
+
+
+void parse_cinst_amode() {
+	uint8_t tmp1, tmp2;
+	/* Determine arg count, source and destination types and locations */
+	switch(cinst.amode_type) {
+		/* Memory operation addressing */
 		case AMEM:
-			if(!amode) { return(data_size); }
-			else if(amode<3) { return(DS_W); }
-			else { return(DS_B); }
+			if(!cinst.amode) { cinst.argc=cinst.data_type; }
+			else if(cinst.amode<0x3) { cinst.argc=DS_W; }
+			else if(cinst.amode>0x7) { cinst.argc=0; }
+			else { cinst.argc=DS_B; }
+			break;
+
+		/* ALU operation addressing */
 		case AALU:
-			return(amode?0:1);
+			cinst.argc=cinst.amode?0:1; break;
+		/* Conditional branching operation relative addhttps://www.grymoire.com/Unix/Awk.html#toc-uh-47ressing */
 		case AREL:
-			return(1);
+			cinst.argc=1; break;
+		/* Everything else */
 		default:
-			return(0);
+			cinst.argc=0; break;
 	}
 }
+
+char *regnames8[] = { "A0","A1","B0","B1","X0","X1","Y0","Y1","Z0","Z1","S0","S1","F0","F1","PC0","PC1" };
+char *regnames16[] = { "A","B","X","Y","Z","S","F","PC" };
+
+char *REG2NAME(uint8_t reg, uint8_t size) {
+	switch(size) {
+		case DS_B: return(regnames8[reg]);
+		case DS_W: default: return(regnames16[reg>>1]);
+	}	    
+}
+uint8_t NAME2REG(char * regname) {
+	uint8_t reg=0;
+	char *c=regname;
+	unsigned char l=tolower(*(c++));
+	switch(l) {
+		case 'a': reg=0x0; break;
+		case 'b': reg=0x2; break;
+		case 'x': reg=0x4; break;
+		case 'y': reg=0x6; break;
+		case 'z': reg=0x8; break;
+		case 's': reg=0xa; break;
+		case 'f': reg=0xc;
+		case 'p': if (tolower(*(c++))=='c') { reg=0xe; } else { return(0xff);}; break;
+		case 'r': if(*c < 0x10) { return(*c); }
+			  l=tolower(*c);
+			  if(l > 'f') { return(0xff); }
+			  if(l >= 'a'){ return(l-'a'); }
+			  if(l>'9' || l < '0') { return(0xff); }
+			  return(l-'0');
+	}
+	switch(*c) {
+		case '0': case 'H': case 'h': return(reg); break;
+		case '1': case 'L': case 'l': default: return(reg+1); break;
+	}
+}
+
 
 
 void parse_cinst_opcode() {
 	inst_base_t *ib;
 	inst_node_t *n=0;
-	amode_type_t *amtp;
 	char *mod;
 	char implicit;
+	amode_type_t *amtp;
 	uint8_t i,j;
 	for(i=0;(ib=inst_bases[i]);i++){
 		for(j=0;ib->n[j].node;j++){
 			n=&ib->n[j];
 			if((cinst.opcode & ~n->mask) == n->offset) {
-				cinst.op_type=ib->op_type;
+				/* We found a match */
+				cinst.argw=0; /* Clear the arguments */
+				cinst.op_type=ib->op_type; /* Store the op type */
+				/* Set implicit registers used by default by various op types */
+				switch(cinst.op_type){
+					case OT_LOAD: cinst.dstreg=NAME2REG((n->node)); break;
+					case OT_STORE: cinst.srcreg=NAME2REG((n->node)); break;
+					case OT_ALU2: cinst.srcreg=NAME2REG("b");
+					case OT_ALU1: cinst.dstreg=NAME2REG("a"); break;
+					default: break;    
+				}
+				/* Determine the data type */
 				cinst.data_type=(ib->data_type==DS_WB?((cinst.opcode&0x10)?DS_W:DS_B):ib->data_type);
-				cinst.amode_type=ib->amode_type;
-				amtp=amode_types[cinst.amode_type];
-				cinst.amode=((cinst.opcode)&(amtp->mask)&(n->mask))>>amtp->shift;
-				cinst.argc=get_amode_argc(cinst.amode,cinst.amode_type,cinst.data_type);
+				cinst.amode_type=ib->amode_type; /* Store the address mode type */
+				amtp=amode_types[cinst.amode_type]; /* Get pointer to details for this address mode type */
+				cinst.amode=((cinst.opcode)&(amtp->mask)&(n->mask))>>amtp->shift; /* Get address mode */
+				/* Parse the addressing mode */
+				parse_cinst_amode();
 				mod=(cinst.data_type==DS_BIT)?
 						(n->mask?mn_flag_mods[cinst.opcode&0x1]:mn_data_size_mods[DS_N])
 						 :mn_data_size_mods[cinst.data_type];
@@ -636,42 +792,194 @@ found:
 /* Fetch an instruction from memory */
 void fetch_instruction() {
 	uint8_t n=0;
-
 	/* Store the address for this instruction and increment the program counter */
 	cinst.address=PC++;
 
 	/* Read the opcode from memory */
 	cinst.opcode=mem_readb(cinst.address);
-	
+	printf("%#06x %02x", cinst.address,cinst.opcode);
 	/* Parse the opcode */
 	parse_cinst_opcode();
 
 	/* Capture additional argument bytes */
 	while(n<cinst.argc) {
 		cinst.args[n]=mem_readb(PC++);
+		printf(" %02x", cinst.args[n]);
 		n++;
 	}
-
+	printf("\n");
 	return;
 }
 
-void parse_instruction() {
-	//parse_cinst_args();
-	return;
-}
 
 void execute_instruction() {
-	
+	uint8_t tmpreg=0;
+	uint16_t tmpaddr=0,tmpsrc,tmpdst,tmpvalue;
+	printf("amode_type: %x ",cinst.amode_type);
+	switch(cinst.amode_type){
+		case AREL:
+			cinst.offset=(int8_t)(cinst.args[0]);
+			cinst.dstaddr=(uint16_t)(PC+(int8_t)cinst.offset);
+		
+		case AALU:
+			if(cinst.argc) {
+				if(cinst.op_type==OT_ALU2) {
+					cinst.dstreg=cinst.args[0]&0x0f;
+					cinst.srcreg=(cinst.args[0]&0xf0)>>4;
+				} else {
+					cinst.dstreg=(cinst.args[0]&0xf0)>>4;
+				}
+			}
+		case AMEM:
+			switch(cinst.amode) {
+				case IMMEDIATE: cinst.value=(cinst.data_type==DS_W)?cinst.argw:cinst.args[0];
+						break;
+				case MEM_DIRECT:
+				case MEM_INDIRECT:
+						   tmpaddr=cinst.argw; break;
+				case PCREL_DIRECT:
+				case PCREL_INDIRECT:
+					cinst.offset=(int8_t)(cinst.args[0]);
+					tmpaddr=(uint16_t)(PC+cinst.offset);
+					printf("PC+%i  %#06x-> %#06x\n", cinst.offset,PC, tmpaddr);
+				case REG_INDIRECT_AUTOIDX:
+					tmpreg=(cinst.args[0]&0xf0)>>4;
+					cinst.idxmode=(cinst.args[0]&0x0f);
+				case IMP_REG_A_INDIRECT: tmpreg=0x0; break;
+				case IMP_REG_B_INDIRECT: tmpreg=0x2; break;
+				case IMP_REG_X_INDIRECT: tmpreg=0x4; break;
+				case IMP_REG_Y_INDIRECT: tmpreg=0x6; break;
+				case IMP_REG_Z_INDIRECT: tmpreg=0x8; break;
+				case IMP_REG_S_INDIRECT: tmpreg=0xa; break;
+				case IMP_REG_F_INDIRECT: tmpreg=0xc; break;
+				case IMP_REG_PC_INDIRECT: tmpreg=0xe; break;
+				default:break;
+			}
+			cinst.indirects=amodes_mem[cinst.amode].indirects;
+			if(cinst.op_type==OT_LOAD) {
+				cinst.srctype=amodes_mem[cinst.amode].type;
+				cinst.srcreg=tmpreg;
+				cinst.srcaddr=tmpaddr;
+			} else {
+				cinst.dsttype=amodes_mem[cinst.amode].type;
+				cinst.dstreg=tmpreg;
+				cinst.dstaddr=tmpaddr;
+			}
+
+	}
+
+	switch(cinst.op_type) {
+		case OT_SYS:
+			sys_func(cinst.opcode); break;
+		case OT_FLOW_COND:
+			flow_cond_rel(cinst.opcode, cinst.offset); break;
+		case OT_FLOW_JUMP:
+			flow_jump(get_valuew(cinst.indirects-1,cinst.dsttype,cinst.dstaddr)); break;
+		case OT_FLOW_CALL:
+			flow_call(get_valuew(cinst.indirects-1,cinst.dsttype,cinst.dstaddr)); break;
+		case OT_ALU1:
+			if (cinst.data_type==DS_W) { alu_op1regw(cinst.opcode, cinst.dstreg, cinst.value); }
+			else { alu_op1regb(cinst.opcode, cinst.dstreg, cinst.value); }
+			break;
+		case OT_ALU2:
+			if (cinst.data_type==DS_W) { alu_op2regw(cinst.opcode, cinst.srcreg, cinst.dstreg); }
+			else { alu_op2regb(cinst.opcode, cinst.srcreg, cinst.dstreg); }
+			break;
+		case OT_LOAD:
+			/* Indirection level: 0=immediate,1=direct,2+=indirect
+			 * Source type: 0=register, 1=address */
+			tmpsrc=cinst.indirects?cinst.srctype?cinst.srcreg:cinst.srcaddr:cinst.value;
+
+			//uint8_t get_valueb(uint8_t indirects, uint8_t srctype, uint16_t src) {
+
+			if (cinst.data_type==DS_W) { reg_writew(cinst.dstreg, get_valuew(cinst.indirects, cinst.srctype, tmpsrc)); }
+			else { reg_writeb(cinst.dstreg, get_valueb(cinst.indirects, cinst.srctype, tmpsrc)); }
+
+		case OT_STORE:
+			tmpdst=cinst.indirects?cinst.srctype?cinst.srcreg:cinst.srcaddr:cinst.value;
+			if (cinst.data_type==DS_W) { put_valuew(cinst.indirects, cinst.dsttype, tmpdst,reg_readw(cinst.srcreg)); }
+			else { put_valueb(cinst.indirects, cinst.dsttype, tmpdst,reg_readb(cinst.srcreg)); }
+	}
 }
 
+#define NUMROMS 1
+typedef struct ROMfile_t {
+	char *filename;
+	uint8_t bank;
+	uint32_t base;
+	uint16_t size;
+	uint8_t reverse;
+	uint64_t addr_bitsalad;
+} ROMfile_t;
+
+static ROMfile_t ROMS[] = {{"Bootstrap.rom",0,0xfc00,0x0200,1,0xfedcba9765843210LL}};
+
+/* Utility functions to extract ranges of bits */
+#define BITRANGE(d,s,n) ((d>>s) & ((2LL<<(n-1))-1) )
+uint16_t bitsalad_16(uint64_t order, uint16_t d) {
+	uint8_t pos;
+	uint16_t out;
+	for(int i=0; i<16; i++) {
+		pos=BITRANGE(order,i*4,4);
+		if(d&1<<i){out |= 1<<pos;}
+	}
+	return(out);
+}
+
+int read_roms() {
+        FILE *fp;
+	char *filename;
+        size_t ret_code;
+	uint16_t ROMSIZE, pos;
+	uint8_t buf[0x10000];
+
+        for(int  i=0; i<NUMROMS; i++) {
+		ROMSIZE=ROMS[i].size;
+		filename=ROMS[i].filename;
+                fp=fopen(filename,"rb");
+                ret_code=fread(buf,1,ROMSIZE,fp);
+                if(ret_code != ROMSIZE) {
+                        if(feof(fp)) {
+                                printf("Unexpected EOF while reading %s: Only got %u byte of an expected %u.\n",
+                                        filename, (uint16_t)ret_code, ROMSIZE);
+                        } else if(ferror(fp)){
+                                printf("Failed while reading %s!\n",filename);
+                        }
+                        fclose(fp);
+                        return(-1);
+                }
+                fclose(fp);
+		for(uint32_t p=0; p<ROMSIZE; p++) {
+			if(ROMS[i].reverse) {
+				pos=ROMS[i].base+(ROMSIZE-1-p);
+			} else {
+				pos=ROMS[i].base+p;
+			}
+			if(ROMS[i].addr_bitsalad) { pos=bitsalad_16(ROMS[i].addr_bitsalad,pos); }
+
+			membank[ROMS[i].bank].a[pos]=buf[p];
+			printf("buf[%04x]=%02x\n",pos, buf[p]);
+			printf("pos: %x val: %x  memval: %x \n", pos, buf[p],membank[ROMS[i].bank].a[pos]);
+		}
+
+        }
+        return(NUMROMS);
+
+}
 int main() {
 	cpuregs=&(mem->r);
 	cpuregset=&(cpuregs->i[0]);
-	mem->a[0x100]=0xa0;
+	read_roms();
+	printf("0xfc90=%02x\n",mem->a[0xfc90]);
+	mem->a[0x100]=0x60;
 	mem->a[0x101]=0x55;
-	PC=0x0100;
-	fetch_instruction();
-	printf("%s %02x\n",cinst.mnemonic, cinst.args[0]);
+	mem->a[0x102]=0x22;
+	PC=0xfc00;
+	for(int i=0; i<0x200;i++) {
+		fetch_instruction();
+		printf("%#06x: %02x %s %02x\n",cinst.address, cinst.opcode, cinst.mnemonic, cinst.argc?cinst.argc>1?ntohs(cinst.argw):cinst.args[0]:0);
+		execute_instruction();
+	}
 	mem->a[0x0200]='H';
 	mem->a[0x0201]='e';
 	mem->a[0x0202]='l';
@@ -691,7 +999,7 @@ int main() {
 
 	//regs_writew(5,('1'<< 8 )|'0');
 	reg_ldb(0x04,0x0200);
-	printf("%c %x\n",mem->a[4], reg_readw(4));
+	printf("%c %x %x\n",mem->a[4], reg_readb(4), reg_readb(5));
 
 
 	return(0);
