@@ -15,6 +15,8 @@
 #define htons(n) HTONS(n)
 #define ntohs(n) NTOHS(n)
 
+#define TRAP(address, ... ) { printf("\nTRAP at address %#06x:",address); printf( __VA_ARGS__); halted=1; }
+
 typedef union status_word_t {
 	uint16_t word;
 	struct {
@@ -814,6 +816,8 @@ void fetch_instruction() {
 
 void execute_instruction() {
 	uint8_t tmpreg=0;
+	int8_t autoidx_delta=0;
+	uint8_t autoidx_reg=0;
 	uint16_t tmpaddr=0,tmpsrc,tmpdst,tmpvalue;
 	printf("amode_type: %x ",cinst.amode_type);
 	switch(cinst.amode_type){
@@ -845,6 +849,13 @@ void execute_instruction() {
 				case REG_INDIRECT_AUTOIDX:
 					tmpreg=(cinst.args[0]&0xf0)>>4;
 					cinst.idxmode=(cinst.args[0]&0x0f);
+					autoidx_reg=tmpreg;
+					if(cinst.idxmode>2) {
+					TRAP(cinst.address,
+						"Unknown auto-index mode specified for register %s: %x",
+						regnames16[tmpreg>>1],cinst.idxmode
+					);}
+					autoidx_delta=!cinst.idxmode?0:cinst.idxmode&1?-1:cinst.idxmode&2?1:42;
 				case IMP_REG_A_INDIRECT: tmpreg=0x0; break;
 				case IMP_REG_B_INDIRECT: tmpreg=0x2; break;
 				case IMP_REG_X_INDIRECT: tmpreg=0x4; break;
@@ -853,7 +864,11 @@ void execute_instruction() {
 				case IMP_REG_S_INDIRECT: tmpreg=0xa; break;
 				case IMP_REG_F_INDIRECT: tmpreg=0xc; break;
 				case IMP_REG_PC_INDIRECT: tmpreg=0xe; break;
-				default:break;
+				default:
+					TRAP(cinst.address,
+						"Unknown addressing mode: op=%#04x",
+						cinst.opcode);
+				break;
 			}
 			cinst.indirects=amodes_mem[cinst.amode].indirects;
 			if(cinst.op_type==OT_LOAD) {
@@ -874,9 +889,13 @@ void execute_instruction() {
 		case OT_FLOW_COND:
 			flow_cond_rel(cinst.opcode, cinst.offset); break;
 		case OT_FLOW_JUMP:
+			cinst.dstreg=cinst.dstreg+(autoidx_delta>0?autoidx_delta:0);
 			flow_jump(get_valuew(cinst.indirects-1,cinst.dsttype,cinst.dstaddr)); break;
+			cinst.dstreg=cinst.dstreg+(autoidx_delta<0?autoidx_delta:0);
 		case OT_FLOW_CALL:
+			cinst.dstreg=cinst.dstreg+(autoidx_delta>0?autoidx_delta:0);
 			flow_call(get_valuew(cinst.indirects-1,cinst.dsttype,cinst.dstaddr)); break;
+			cinst.dstreg=cinst.dstreg+(autoidx_delta<0?autoidx_delta:0);
 		case OT_ALU1:
 			if (cinst.data_type==DS_W) { alu_op1regw(cinst.opcode, cinst.dstreg, cinst.value); }
 			else { alu_op1regb(cinst.opcode, cinst.dstreg, cinst.value); }
@@ -886,6 +905,7 @@ void execute_instruction() {
 			else { alu_op2regb(cinst.opcode, cinst.srcreg, cinst.dstreg); }
 			break;
 		case OT_LOAD:
+			cinst.dstreg=cinst.dstreg+(autoidx_delta>0?autoidx_delta:0);
 			/* Indirection level: 0=immediate,1=direct,2+=indirect
 			 * Source type: 0=register, 1=address */
 			tmpsrc=cinst.indirects?cinst.srctype?cinst.srcreg:cinst.srcaddr:cinst.value;
@@ -894,11 +914,14 @@ void execute_instruction() {
 
 			if (cinst.data_type==DS_W) { reg_writew(cinst.dstreg, get_valuew(cinst.indirects, cinst.srctype, tmpsrc)); }
 			else { reg_writeb(cinst.dstreg, get_valueb(cinst.indirects, cinst.srctype, tmpsrc)); }
+			cinst.dstreg=cinst.dstreg+(autoidx_delta<0?autoidx_delta:0);
 
 		case OT_STORE:
-			tmpdst=cinst.indirects?cinst.srctype?cinst.srcreg:cinst.srcaddr:cinst.value;
+			cinst.srcreg=cinst.srcreg+(autoidx_delta>0?autoidx_delta:0);
+			tmpdst=cinst.indirects?cinst.dsttype?cinst.dstreg:cinst.dstaddr:cinst.value;
 			if (cinst.data_type==DS_W) { put_valuew(cinst.indirects, cinst.dsttype, tmpdst,reg_readw(cinst.srcreg)); }
 			else { put_valueb(cinst.indirects, cinst.dsttype, tmpdst,reg_readb(cinst.srcreg)); }
+			cinst.srcreg=cinst.srcreg+(autoidx_delta<0?autoidx_delta:0);
 	}
 }
 
