@@ -1,6 +1,11 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <ctype.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <unistd.h>
 
 #define swap_bytes(n) (((((uint16_t)(n) & 0xFF)) << 8) | (((uint16_t)(n) & 0xFF00) >> 8))
 
@@ -16,6 +21,9 @@
 #define ntohs(n) NTOHS(n)
 
 #define TRAP(address, ... ) { printf("\nTRAP at address %#06x:",address); printf( __VA_ARGS__); halted=1; }
+
+uint8_t mmio_mux_writeb(uint16_t ioaddr, uint8_t val);
+uint8_t mmio_mux_readb(uint16_t ioaddr);
 
 typedef union status_word_t {
 	uint16_t word;
@@ -201,11 +209,17 @@ void usermem_writeb(uint16_t dst, uint8_t val) {
 
 /* This will get special handling later */
 uint8_t mmio_readb(uint16_t src) {
+	if( src >= 0xf200 && src < 0xf300 ) {
+		return(mmio_mux_readb(src-0xf200));
+	}
 	return(mem->a[src]);
 }
 
 /* This will get special handling later */
 void mmio_writeb(uint16_t dst, uint8_t val) {
+	if( dst >= 0xf200 && dst < 0xf300 ) {
+		mmio_mux_writeb(dst-0xf200, val);
+	}
 	return;
 }
 
@@ -846,6 +860,7 @@ void execute_instruction() {
 					cinst.offset=(int8_t)(cinst.args[0]);
 					tmpaddr=(uint16_t)(PC+cinst.offset);
 					printf("PC+%i  %#06x-> %#06x\n", cinst.offset,PC, tmpaddr);
+					break;
 				case REG_INDIRECT_AUTOIDX:
 					tmpreg=(cinst.args[0]&0xf0)>>4;
 					cinst.idxmode=(cinst.args[0]&0x0f);
@@ -856,6 +871,7 @@ void execute_instruction() {
 						regnames16[tmpreg>>1],cinst.idxmode
 					);}
 					autoidx_delta=!cinst.idxmode?0:cinst.idxmode&1?-1:cinst.idxmode&2?1:42;
+					break;
 				case IMP_REG_A_INDIRECT: tmpreg=0x0; break;
 				case IMP_REG_B_INDIRECT: tmpreg=0x2; break;
 				case IMP_REG_X_INDIRECT: tmpreg=0x4; break;
@@ -989,16 +1005,95 @@ int read_roms() {
         return(NUMROMS);
 
 }
+/* MUX Ports (N) with input and output lines */
+#define MUXPORTS 1
+int mux_running=0;
+int MUX[MUXPORTS][2]; /* File descriptors for open MUX fifo endpoints */
+static const char *MUX_fifo[MUXPORTS][2] = { {"mux0out","mux0in"} };
+
+int start_mux(uint8_t port){
+	if(port>MUXPORTS-1) { return(-EINVAL); }
+	for (uint8_t i=0;i<2;i++) {
+		if ( mkfifo(MUX_fifo[port][i],0666) ) {
+			printf("Failed to create %s FIFO: %s\n", i?"input":"output", MUX_fifo[port][0]);
+			return(-1);
+		}
+	}
+	mux_running |= 1<<port;
+	return(0);
+}
+
+int connect_mux(uint8_t port, uint8_t dir) {
+	if(port>MUXPORTS-1) { return(-EINVAL); }
+	if( MUX[port][dir] ) { return(0); }
+	if ( ( MUX[port][dir]= open(MUX_fifo[port][dir], (dir?O_RDONLY:O_WRONLY)|O_NONBLOCK) ) < 0 ) {
+		if(errno != ENXIO) {
+			perror("Error opening FIFO:");
+			return(-1);
+		} 
+	}
+	return(0);
+
+}
+
+int mux_out(uint8_t port,char c) {
+	if(!(mux_running&(1<<port)) || port>MUXPORTS-1) { return(-EINVAL); }
+	if( connect_mux(port,0) < 0 ) { return(-1); }
+	write(MUX[port][0],&c,1);
+	return(0);
+}
+
+int mux_in(uint8_t port) {
+	char c;
+	if(!(mux_running&(1<<port)) || port>MUXPORTS-1) { return(-EINVAL); }
+	if( connect_mux(port,1) < 0 ) { return(-1); }
+	if( (read(MUX[port][1], &c,1)) != -1) { return((int)c); }
+	return(-1);
+}
+
+int stop_mux(uint8_t port) {
+	if(port>MUXPORTS-1) { return(-EINVAL); }
+	close(MUX[port][0]);
+	close(MUX[port][1]);
+	remove(MUX_fifo[port][0]);
+	remove(MUX_fifo[port][1]);
+
+	mux_running &= ~(1<<port);
+	return(0);
+}
+
+uint8_t mmio_mux_readb(uint16_t ioaddr) {
+	switch(ioaddr) {
+		case 0x00:
+		case 0x01:
+			return(mux_in(0));
+		default: break;
+	}
+}
+
+uint8_t mmio_mux_writeb(uint16_t ioaddr, uint8_t val) {
+	switch(ioaddr) {
+		case 0x00:
+		case 0x01:
+			return(mux_out(0,val));
+		default: break;
+	}
+}
+
+
 int main() {
+
 	cpuregs=&(mem->r);
 	cpuregset=&(cpuregs->i[0]);
 	read_roms();
+	start_mux(0);
 	printf("0xfc90=%02x\n",mem->a[0xfc90]);
 	mem->a[0x100]=0x60;
 	mem->a[0x101]=0x55;
 	mem->a[0x102]=0x22;
 	PC=0xfc00;
-	for(int i=0; i<0x200;i++) {
+	halted=0;
+	while(!halted) {
 		fetch_instruction();
 		printf("%#06x: %02x %s %02x\n",cinst.address, cinst.opcode, cinst.mnemonic, cinst.argc?cinst.argc>1?ntohs(cinst.argw):cinst.args[0]:0);
 		execute_instruction();
@@ -1024,6 +1119,7 @@ int main() {
 	reg_ldb(0x04,0x0200);
 	printf("%c %x %x\n",mem->a[4], reg_readb(4), reg_readb(5));
 
+	stop_mux(0);
 
 	return(0);
 }
