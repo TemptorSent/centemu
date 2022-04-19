@@ -20,7 +20,7 @@
 #define htons(n) HTONS(n)
 #define ntohs(n) NTOHS(n)
 
-#define TRAP(address, ... ) { printf("\nTRAP at address %#06x:",address); printf( __VA_ARGS__); halted=1; }
+#define TRAP(address, ... ) { fprintf(stderr,"\nTRAP at address %#06x:",address); fprintf(stderr, __VA_ARGS__); halted=1; }
 
 uint8_t mmio_mux_writeb(uint16_t ioaddr, uint8_t val);
 uint8_t mmio_mux_readb(uint16_t ioaddr);
@@ -86,7 +86,10 @@ typedef struct inst_base_t {
 
 enum op_types { OT_SYS, OT_FLOW_COND, OT_FLOW_JUMP, OT_FLOW_CALL, OT_ALU1, OT_ALU2, OT_LOAD, OT_STORE };
 enum op_dsize { DS_N, DS_B, DS_W, DS_WB, DS_BIT };
-enum amode_types { ANONE, AREL, AALU, AMEM };
+enum amode_types { ANONE, AREL, AALU, AMEM, ADMA, ATREG };
+static inst_base_t ib_tregs={"t", OT_ALU2,DS_W,ATREG,{{"as",0x5f,0x00},{0,0,0}}};
+
+static inst_base_t ib_dma={"dma", OT_SYS,DS_B,ADMA,{{"",0x2f,0x00},{0,0,0}}};
 
 static inst_base_t ib_jump={"jump",OT_FLOW_JUMP,DS_N,AMEM,{{"",0x70,0x07},{0,0,0}}};
 
@@ -133,6 +136,8 @@ static inst_base_t ib_misc={"",OT_SYS,DS_N,ANONE,{
 }};
 
 static inst_base_t *inst_bases[]= {
+	&ib_tregs,
+	&ib_dma,
 	&ib_jump,
 	&ib_call,
 	&ib_reti,
@@ -342,7 +347,7 @@ void alu_op1regb(uint8_t op, uint8_t reg, uint8_t opt) {
 		case ALU_CLR: res=0; break;
 		case ALU_NOT: res=~arg; break;
 		case ALU_LSR: res=arg>>(1+opt); status.C=((arg>>opt)&0x01)?1:0; 
-			      printf("LSR[%x]: %x -> %x C=%u",reg,arg,res,status.C);break;
+			      fprintf(stderr,"LSR[%x]: %x -> %x C=%u",reg,arg,res,status.C);break;
 		case ALU_LSL: res=arg<<(1+opt); status.C=((arg<<opt)&0x80)?1:0; break;
 		case ALU_RLC: /* Dup arg bits, shift up, take the high word and shift back down */
 			      tmp= ( ( (arg<<8|arg)<<(1+opt) )  & 0xff00 ) >> 8;
@@ -356,7 +361,7 @@ void alu_op1regb(uint8_t op, uint8_t reg, uint8_t opt) {
 	/* Set zero and minus flags appropriately*/
 	status.Z=res?0:1;
 	status.M=(res&0x80)?1:0;
-	
+	fprintf(stderr,"\nALU1b: r[%0x]=%0x opt=%0x op=%0x, res=%0x\n",reg,arg,opt,op,res);
 	reg_writeb(reg,res);
 	return;
 }
@@ -386,12 +391,13 @@ void alu_op1regw(uint8_t op, uint8_t reg, uint8_t opt) {
 	/* Set zero and minus flags appropriately*/
 	status.Z=res?0:1;
 	status.M=(res&0x8000)?1:0;
+	fprintf(stderr,"\nALU1w: r[%0x]=%0x opt=%0x op=%0x, res=%0x\n",reg,arg,opt,op,res);
 	
 	reg_writew(reg,res);
 	return;
 }
 
-/* Handle word size two register ALU instructions */
+/* Handle byte size two register ALU instructions */
 void alu_op2regb(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
 	uint8_t srcarg,dstarg,res;
 	uint16_t tmp;
@@ -415,18 +421,20 @@ void alu_op2regb(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
 		case ALU_AND: res=dstarg&srcarg; break;
 		case ALU_OR: res=dstarg|srcarg; break;
 		case ALU_XOR: res=dstarg^srcarg; break;
-		case ALU_MOV: res=srcarg; break;
-		default: break;
+		case ALU_MOV:
+		default:
+			res=srcarg; break;
 	}
 	/* Set zero and minus flags appropriately*/
 	status.Z=res?0:1;
 	status.M=(res&0x80)?1:0;
+	fprintf(stderr,"\nALU2b: srcrreg[%0x]=%0x dstreg[%0x]=%0x op=%0x, res=%0x\n",srcreg,srcarg,dstreg,dstarg,op,res);
 	 
 	reg_writeb(dstreg,res);
 	return;
 }
 
-/* Handle byte size two register ALU instructions */
+/* Handle word size two register ALU instructions */
 void alu_op2regw(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
 	uint16_t srcarg,dstarg,res;
 	uint32_t tmp;
@@ -450,12 +458,14 @@ void alu_op2regw(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
 		case ALU_AND: res=dstarg&srcarg; break;
 		case ALU_OR: res=dstarg|srcarg; break;
 		case ALU_XOR: res=dstarg^srcarg; break;
-		case ALU_MOV: res=srcarg; break;
-		default: break;
+		case ALU_MOV:
+		default:
+			res=srcarg; break;
 	}
 	/* Set zero and minus flags appropriately*/
 	status.Z=res?0:1;
 	status.M=(res&0x8000)?1:0;
+	fprintf(stderr,"\nALU2w: srcrreg[%0x]=%0x dstreg[%0x]=%0x op=%0x, res=%0x\n",srcreg,srcarg,dstreg,dstarg,op,res);
 	 
 	reg_writew(dstreg,res);
 	return;
@@ -487,6 +497,9 @@ void sys_delay() {
 	return;
 }
 
+void sys_dma() {
+	fprintf(stderr,"DMA instruction\n");
+}
 enum sys_functions {
 	SYS_HALT, SYS_NOP,
 	FLAG_MINUS_SET, FLAG_MINUS_CLEAR,
@@ -495,12 +508,12 @@ enum sys_functions {
 	FLAG_ALL_CLEAR, FLOW_RET,
 	FLOW_RETI, SYS_0x0b,
 	SYS_0x0c, SYS_0x0d,
-	SYS_DELAY, SYS_0x0f
+	SYS_DELAY, SYS_0x0f, SYS_DMA=0x2f
 };
 
 /* System functions */
 void sys_func(uint8_t op) {
-	switch(op&0xf) {
+	switch(op) {
 		case SYS_HALT: sys_halt(); break;
 		case SYS_NOP: break;
 		case FLAG_MINUS_SET: status.M=1; break;
@@ -512,6 +525,7 @@ void sys_func(uint8_t op) {
 		case FLOW_RET: flow_ret(); break;
 		case FLOW_RETI: flow_reti(); break;
 		case SYS_DELAY: sys_delay(); break;
+		case SYS_DMA: sys_dma(); break;
 		default: break;
 	}
 	return;
@@ -556,7 +570,7 @@ void flow_cond_rel(uint8_t op, int8_t offset) {
 	/* If the result is true, add the specified offset to the PC */
 	if(res){
 		PC=(uint16_t)(PC+(int8_t)offset);
-		printf("\n Jumping to %04x\n",PC);
+		fprintf(stderr,"\n Jumping to %04x\n",PC);
 	}
 	return;
 }
@@ -564,7 +578,7 @@ void flow_cond_rel(uint8_t op, int8_t offset) {
 /* Unconditional branch instructions */
 void flow_jump(uint16_t dst) {
 	PC=dst;
-	printf("\n Jumping to %04x\n",PC);
+	fprintf(stderr,"\n Jumping to %04x\n",PC);
 	return;
 }
 
@@ -656,36 +670,36 @@ static amode_t amodes_mem[]={
  * Source type: 0=register, 1=address */
 
 uint8_t get_valueb(uint8_t indirects, uint8_t srctype, uint16_t src) {
-	printf("Getting byte value: indirects=%u, srctype=%u, src=%#06x\n",indirects,srctype,src);
+	fprintf(stderr,"Getting byte value: indirects=%u, srctype=%u, src=%#06x\n",indirects,srctype,src);
 	/* Special case register direct where we only want to read and return a byte from the reg */
 	if(indirects==0){ return(src&0xff); }
 	if(indirects==1&&!srctype){ return(reg_readb(src&0xf)); }
 	while(indirects-->1){
 		if(srctype++) { src=( (mem_readb(src)<<8) + mem_readb(src+1) ); }
 		else { src=reg_readw((src&0xf)); }
-		printf("             value: indirects=%u, srctype=%u, src=%#06x\n",indirects,srctype,src);
+		fprintf(stderr,"             value: indirects=%u, srctype=%u, src=%#06x\n",indirects,srctype,src);
 	}
 	return(mem_readb(src));
 }
 
 uint16_t get_valuew(uint8_t indirects, uint8_t srctype, uint16_t src) {
-	printf("Getting word value: indirects=%u, srctype=%u, src=%#06x\n",indirects,srctype,src);
+	fprintf(stderr,"Getting word value: indirects=%u, srctype=%u, src=%#06x\n",indirects,srctype,src);
 	while(indirects--){
 		if(srctype++) { src=( (mem_readb(src)<<8) + mem_readb(src+1) ); }
 		else { src=reg_readw((src&0xf)); }
-		printf("        word value: indirects=%u, srctype=%u, src=%#06x\n",indirects,srctype,src);
+		fprintf(stderr,"        word value: indirects=%u, srctype=%u, src=%#06x\n",indirects,srctype,src);
 	}
 	return(src);
 }
 
 void put_valueb(uint8_t indirects, uint8_t dsttype, uint16_t dst, uint8_t val) {
-	printf("Putting byte value: indirects=%u, dsttype=%u, dst=%#06x\n",indirects,dsttype,dst);
+	fprintf(stderr,"Putting byte value: indirects=%u, dsttype=%u, dst=%#06x\n",indirects,dsttype,dst);
 	/* Special case register direct where we only want to store a byte to the reg */
 	if(indirects==1&&!dsttype){ return(reg_writeb(dst&0xf, val)); }
 	while(indirects-->1){
 		if(dsttype++) { dst=( (mem_readb(dst)<<8) + mem_readb(dst+1) ); }
 		else { dst=reg_readw((dst&0xf)); }
-		printf("             value: indirects=%u, dsttype=%u, dst=%#06x\n",indirects,dsttype,dst);
+		fprintf(stderr,"             value: indirects=%u, dsttype=%u, dst=%#06x\n",indirects,dsttype,dst);
 	}
 	mem_writeb(dst,val);
 	return;
@@ -723,6 +737,7 @@ void parse_cinst_amode() {
 			cinst.argc=cinst.amode?0:1; break;
 		/* Conditional branching operation relative addhttps://www.grymoire.com/Unix/Awk.html#toc-uh-47ressing */
 		case AREL:
+		case ADMA:
 			cinst.argc=1; break;
 		/* Everything else */
 		default:
@@ -740,6 +755,7 @@ char *REG2NAME(uint8_t reg, uint8_t size) {
 	}	    
 }
 uint8_t NAME2REG(char * regname) {
+	fprintf(stderr,"Looking up number for register '%s' (%0x)",regname,*regname);
 	uint8_t reg=0;
 	char *c=regname;
 	unsigned char l=tolower(*(c++));
@@ -760,8 +776,12 @@ uint8_t NAME2REG(char * regname) {
 			  return(l-'0');
 	}
 	switch(*c) {
-		case '0': case 'H': case 'h': return(reg); break;
-		case '1': case 'L': case 'l': default: return(reg+1); break;
+		case '0': case 'H': case 'h':
+			fprintf(stderr," found %u(H)",reg);
+			return(reg); break;
+		case '1': case 'L': case 'l': default:
+			fprintf(stderr," found %u(L)",reg+1);
+			return(reg+1); break;
 	}
 }
 
@@ -771,6 +791,7 @@ void parse_cinst_opcode() {
 	inst_base_t *ib;
 	inst_node_t *n=0;
 	char *mod;
+	char tmpname[2]=" ";
 	char implicit;
 	amode_type_t *amtp;
 	uint8_t i,j;
@@ -785,8 +806,18 @@ void parse_cinst_opcode() {
 				switch(cinst.op_type){
 					case OT_LOAD: cinst.dstreg=NAME2REG((n->node)); break;
 					case OT_STORE: cinst.srcreg=NAME2REG((n->node)); break;
-					case OT_ALU2: cinst.srcreg=1; //NAME2REG("a");
-					case OT_ALU1: cinst.dstreg=1; //NAME2REG("a"); 
+					case OT_ALU2:
+						if(ib->amode_type == ATREG ) {
+							tmpname[0]=*(n->node);
+							cinst.srcreg=NAME2REG(tmpname);
+							tmpname[0]=*(n->node+1);
+							cinst.dstreg=NAME2REG(tmpname);
+							break;
+						} else {
+						       cinst.srcreg=NAME2REG("b");
+						}
+					case OT_ALU1:
+						       cinst.dstreg=NAME2REG("a"); 
 						      break;
 					default: break;    
 				}
@@ -823,17 +854,17 @@ void fetch_instruction() {
 
 	/* Read the opcode from memory */
 	cinst.opcode=mem_readb(cinst.address);
-	printf("%#06x %02x", cinst.address,cinst.opcode);
+	fprintf(stderr,"%#06x %02x", cinst.address,cinst.opcode);
 	/* Parse the opcode */
 	parse_cinst_opcode();
 
 	/* Capture additional argument bytes */
 	while(n<cinst.argc) {
 		cinst.args[n]=mem_readb(PC++);
-		printf(" %02x", cinst.args[n]);
+		fprintf(stderr," %02x", cinst.args[n]);
 		n++;
 	}
-	printf("\n");
+	fprintf(stderr,"\n");
 	return;
 }
 
@@ -843,14 +874,15 @@ void execute_instruction() {
 	int8_t autoidx_delta=0;
 	uint8_t autoidx_reg=0;
 	uint16_t tmpaddr=0,tmpsrc,tmpdst,tmpvalue;
-	printf("amode_type: %x ",cinst.amode_type);
+	char srcname,dstname;
+	fprintf(stderr,"amode_type: %x ",cinst.amode_type);
 	switch(cinst.amode_type){
 		case AREL:
 			cinst.offset=(int8_t)(cinst.args[0]);
 			cinst.dstaddr=(uint16_t)(PC+(int8_t)cinst.offset);
 			break;
 		case AALU:
-			printf("AALU argc=%u op_type=%u\n", cinst.argc, cinst.op_type);
+			fprintf(stderr,"AALU argc=%u op_type=%u\n", cinst.argc, cinst.op_type);
 			if(cinst.argc) {
 				if(cinst.op_type==OT_ALU2) {
 					cinst.dstreg=cinst.args[0]&0x0f;
@@ -863,7 +895,7 @@ void execute_instruction() {
 			break;
 		case AMEM:
 			switch(cinst.amode) {
-				case IMMEDIATE: cinst.value=(cinst.data_type==DS_W)?cinst.argw:cinst.args[0];
+				case IMMEDIATE: cinst.value=(cinst.data_type==DS_W)?ntohs(cinst.argw):cinst.args[0];
 						break;
 				case MEM_DIRECT:
 				case MEM_INDIRECT:
@@ -872,7 +904,7 @@ void execute_instruction() {
 				case PCREL_INDIRECT:
 					cinst.offset=(int8_t)(cinst.args[0]);
 					tmpaddr=(uint16_t)(PC+cinst.offset);
-					printf("PC+%i  %#06x-> %#06x\n", cinst.offset,PC, tmpaddr);
+					fprintf(stderr,"PC+%i  %#06x-> %#06x\n", cinst.offset,PC, tmpaddr);
 					break;
 				case REG_INDIRECT_AUTOIDX:
 					tmpreg=(cinst.args[0]&0xf0)>>4;
@@ -884,7 +916,7 @@ void execute_instruction() {
 						regnames16[tmpreg>>1],cinst.idxmode
 					);}
 					autoidx_delta=!cinst.idxmode?0:cinst.idxmode&1?1:cinst.idxmode&2?-1:42;
-					printf("Autoindexing register %0x with delta %i",autoidx_reg,autoidx_delta);
+					fprintf(stderr,"Autoindexing register %0x with delta %i",autoidx_reg,autoidx_delta);
 					break;
 				case IMP_REG_A_INDIRECT: tmpreg=0x0; break;
 				case IMP_REG_B_INDIRECT: tmpreg=0x2; break;
@@ -938,7 +970,7 @@ void execute_instruction() {
 			/* Indirection level: 0=immediate,1=direct,2+=indirect
 			 * Source type: 0=register, 1=address */
 			tmpsrc=cinst.indirects?cinst.srctype?cinst.srcaddr:cinst.srcreg:cinst.value;
-			printf("Loading reg %0x from %0x\n",cinst.srcreg,tmpsrc);
+			fprintf(stderr,"Loading reg %0x from %0x\n",cinst.dstreg,tmpsrc);
 
 			if (cinst.data_type==DS_W) {
 				tmpvalue=get_valuew(cinst.indirects, cinst.srctype, tmpsrc);
@@ -954,7 +986,7 @@ void execute_instruction() {
 
 		case OT_STORE:
 			tmpdst=cinst.indirects?cinst.dsttype?cinst.dstaddr:cinst.dstreg:cinst.value;
-			printf("Storing %0x from reg %0x\n",tmpdst, cinst.srcreg);
+			fprintf(stderr,"Storing %0x from reg %0x\n",tmpdst, cinst.srcreg);
 			if (cinst.data_type==DS_W) { put_valuew(cinst.indirects, cinst.dsttype, tmpdst,reg_readw(cinst.srcreg)); }
 			else { put_valueb(cinst.indirects, cinst.dsttype, tmpdst,reg_readb(cinst.srcreg)); }
 			break;
@@ -1000,10 +1032,10 @@ int read_roms() {
                 ret_code=fread(buf,1,ROMSIZE,fp);
                 if(ret_code != ROMSIZE) {
                         if(feof(fp)) {
-                                printf("Unexpected EOF while reading %s: Only got %u byte of an expected %u.\n",
+                                fprintf(stderr,"Unexpected EOF while reading %s: Only got %u byte of an expected %u.\n",
                                         filename, (uint16_t)ret_code, ROMSIZE);
                         } else if(ferror(fp)){
-                                printf("Failed while reading %s!\n",filename);
+                                fprintf(stderr,"Failed while reading %s!\n",filename);
                         }
                         fclose(fp);
                         return(-1);
@@ -1018,8 +1050,8 @@ int read_roms() {
 			if(ROMS[i].addr_bitsalad) { pos=bitsalad_16(ROMS[i].addr_bitsalad,pos); }
 
 			membank[ROMS[i].bank].a[pos]=buf[p];
-			printf("buf[%04x]=%02x\n",pos, buf[p]);
-			printf("pos: %x val: %x  memval: %x \n", pos, buf[p],membank[ROMS[i].bank].a[pos]);
+			fprintf(stderr,"buf[%04x]=%02x\n",pos, buf[p]);
+			fprintf(stderr,"pos: %x val: %x  memval: %x \n", pos, buf[p],membank[ROMS[i].bank].a[pos]);
 		}
 
         }
@@ -1044,7 +1076,7 @@ int start_mux(uint8_t port){
 	if(port>MUXPORTS-1) { return(-EINVAL); }
 	for (uint8_t i=0;i<2;i++) {
 		if ( mkfifo(MUX_fifo[port][i],0666) ) {
-			printf("Failed to create %s FIFO: %s\n", i?"input":"output", MUX_fifo[port][0]);
+			fprintf(stderr,"Failed to create %s FIFO: %s\n", i?"input":"output", MUX_fifo[port][0]);
 			return(-1);
 		}
 	}
@@ -1092,10 +1124,11 @@ int stop_mux(uint8_t port) {
 }
 
 uint8_t mmio_mux_readb(uint16_t ioaddr) {
+	uint8_t status=0x3;
 	switch(ioaddr&0xf) {
 		case 0x00:
-			printf("\nMUX status: 0x2\n");
-			return(0x2);
+			printf("\nMUX status: %0x\n",status);
+			return(status);
 		case 0x01:
 			//return(mux_in(0));
 			printf("\nMUX input: ");
@@ -1122,7 +1155,7 @@ int main() {
 	cpuregset=&(cpuregs->i[0]);
 	read_roms();
 	//start_mux(0);
-	printf("0xfc90=%02x\n",mem->a[0xfc90]);
+	fprintf(stderr,"0xfc90=%02x\n",mem->a[0xfc90]);
 	mem->a[0x100]=0x60;
 	mem->a[0x101]=0x55;
 	mem->a[0x102]=0x22;
@@ -1130,9 +1163,9 @@ int main() {
 	halted=0;
 	while(!halted) {
 		fetch_instruction();
-		printf("%#06x: %02x %s %02x\n",cinst.address, cinst.opcode, cinst.mnemonic, cinst.argc?cinst.argc>1?ntohs(cinst.argw):cinst.args[0]:0);
+		fprintf(stderr,"%#06x: %02x %s %02x\n",cinst.address, cinst.opcode, cinst.mnemonic, cinst.argc?cinst.argc>1?ntohs(cinst.argw):cinst.args[0]:0);
 		execute_instruction();
-		printf("Status word:[%c%c%c%c]\n",status.C?'C':' ',status.Z?'Z':' ',status.V?'V':' ',status.M?'M':' ');
+		fprintf(stderr,"Status word:[%c%c%c%c]\n",status.C?'C':' ',status.Z?'Z':' ',status.V?'V':' ',status.M?'M':' ');
 	}
 	mem->a[0x0200]='H';
 	mem->a[0x0201]='e';
@@ -1153,7 +1186,7 @@ int main() {
 
 	//regs_writew(5,('1'<< 8 )|'0');
 	reg_ldb(0x04,0x0200);
-	printf("%c %x %x\n",mem->a[4], reg_readb(4), reg_readb(5));
+	fprintf(stderr,"%c %x %x\n",mem->a[4], reg_readb(4), reg_readb(5));
 
 	stop_mux(0);
 
