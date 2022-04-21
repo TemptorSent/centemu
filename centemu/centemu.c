@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <ctype.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -24,6 +25,8 @@
 
 uint8_t mmio_mux_writeb(uint16_t ioaddr, uint8_t val);
 uint8_t mmio_mux_readb(uint16_t ioaddr);
+uint8_t mmio_diag_writeb(uint16_t ioaddr, uint8_t val);
+uint8_t mmio_diag_readb(uint16_t ioaddr);
 
 typedef union status_word_t {
 	uint16_t word;
@@ -87,7 +90,9 @@ typedef struct inst_base_t {
 enum op_types { OT_SYS, OT_FLOW_COND, OT_FLOW_JUMP, OT_FLOW_CALL, OT_ALU1, OT_ALU2, OT_LOAD, OT_STORE };
 enum op_dsize { DS_N, DS_B, DS_W, DS_WB, DS_BIT };
 enum amode_types { ANONE, AREL, AALU, AMEM, ADMA, ATREG };
-static inst_base_t ib_tregs={"t", OT_ALU2,DS_W,ATREG,{{"as",0x5f,0x00},{0,0,0}}};
+static inst_base_t ib_tregs={"t", OT_ALU2,DS_W,ATREG,{
+	{"ay",0x5c,0x00},{"ab",0x5d,0x00},{"az",0x5e,0x00},{"as",0x5f,0x00},{0,0,0}
+}};
 
 static inst_base_t ib_dma={"dma", OT_SYS,DS_B,ADMA,{{"",0x2f,0x00},{0,0,0}}};
 
@@ -118,9 +123,12 @@ static inst_base_t ib_bf={"b",OT_FLOW_COND,DS_BIT,AREL,{
 }};
 
 static inst_base_t ib_b={"b",OT_FLOW_COND,DS_N,AREL,{
-	{"gtz",0x16,0x00},{"lez",0x17,0x00},{"ltz",0x18,0x00},{"gez",0x19,0x00},
-	{"xs0",0x1a,0x00}, {"xs1",0x1b,0x00},{"xs2",0x1c,0x00},{"xs3",0x1d,0x00},
-	{"b0x1e",0x1e,0x00},{"b0x1f",0x1f,0x00},{0,0,0}
+	{"gtz",0x16,0x00},{"gez",0x17,0x00},
+	{"ltz",0x18,0x00},{"lez",0x19,0x00},
+	{"xs0",0x1a,0x00}, {"xs1",0x1b,0x00},
+	{"xs2",0x1c,0x00},{"xs3",0x1d,0x00},
+	{"b0x1e",0x1e,0x00},{"b0x1f",0x1f,0x00},
+	{0,0,0}
 }};
 
 static inst_base_t ib_alumisc={"",OT_ALU1,DS_WB,AALU,{{"inc",0x20,0x18},{"dec",0x21,0x18},{"clr",0x22,0x18},{"not",0x23,0x18},{0,0,0}}};
@@ -214,17 +222,15 @@ void usermem_writeb(uint16_t dst, uint8_t val) {
 
 /* This will get special handling later */
 uint8_t mmio_readb(uint16_t src) {
-	if( src >= 0xf200 && src < 0xf300 ) {
-		return(mmio_mux_readb(src));
-	}
+	if( src >= 0xf200 && src < 0xf300 ) { return(mmio_mux_readb(src)); }
+	else if (src >= 0xf100 && src <= 0xf110 ) { return(mmio_diag_readb(src)); }
 	return(mem->a[src]);
 }
 
 /* This will get special handling later */
 void mmio_writeb(uint16_t dst, uint8_t val) {
-	if( dst >= 0xf200 && dst < 0xf300 ) {
-		mmio_mux_writeb(dst, val);
-	}
+	if( dst >= 0xf200 && dst < 0xf300 ) { mmio_mux_writeb(dst, val); }
+	else if (dst >= 0xf100 && dst <= 0xf110 ) { mmio_diag_writeb(dst, val); }
 	return;
 }
 
@@ -327,7 +333,7 @@ enum alu_ops1 {
 	ALU_LSR,ALU_LSL,
 	ALU_RRC,ALU_RLC
 };
-/* Two register */
+/* Two register ALU ops, 0x5c and above are all implict moves */
 enum alu_ops2 {
 	ALU_ADD,ALU_SUB,
 	ALU_AND,ALU_OR,
@@ -406,20 +412,20 @@ void alu_op2regb(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
 	dstarg=reg_readb(dstreg);
 
 	switch(op&0x07) {
-		case ALU_ADD:
+		case ALU_ADD: case ALU_ADD|0x8:
 			tmp=dstarg+srcarg;
 			res=dstarg+srcarg;
 			status.C=(tmp&0x0100)?1:0;
 			status.V=(~((srcarg&0x80)^(dstarg&0x80)) & ((res&0x80)^(srcarg&0x80)))?1:0;
 			break;
-		case ALU_SUB:
+		case ALU_SUB: case ALU_SUB|0x8:
 			tmp=dstarg-srcarg;
 			res=dstarg-srcarg;
 			status.C=(tmp&0x0100)?1:0;
 			status.V=(~((res&0x80)^(dstarg&0x80)) & ((dstarg&0x80)^(srcarg&0x80)))?1:0;
 			break;
-		case ALU_AND: res=dstarg&srcarg; break;
-		case ALU_OR: res=dstarg|srcarg; break;
+		case ALU_AND: case ALU_AND|0x8: res=dstarg&srcarg; break;
+		case ALU_OR: case ALU_OR|0x8: res=dstarg|srcarg; break;
 		case ALU_XOR: res=dstarg^srcarg; break;
 		case ALU_MOV:
 		default:
@@ -442,21 +448,21 @@ void alu_op2regw(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
 	srcarg=reg_readw(srcreg);
 	dstarg=reg_readw(dstreg);
 
-	switch(op&0x07) {
-		case ALU_ADD:
+	switch(op&0x0f) {
+		case ALU_ADD: case ALU_ADD|0x8:
 			tmp=dstarg+srcarg;
 			res=dstarg+srcarg;
 			status.C=(tmp&0x00010000)?1:0;
 			status.V=(~((srcarg&0x8000)^(dstarg&0x8000)) & ((res&0x8000)^(srcarg&0x8000)))?1:0;
 			break;
-		case ALU_SUB:
+		case ALU_SUB: case ALU_SUB|0x8:
 			tmp=dstarg-srcarg;
 			res=dstarg-srcarg;
 			status.C=(tmp&0x00010000)?1:0;
 			status.V=(~((res&0x8000)^(dstarg&0x8000)) & ((dstarg&0x8000)^(srcarg&0x8000)))?1:0;
 			break;
-		case ALU_AND: res=dstarg&srcarg; break;
-		case ALU_OR: res=dstarg|srcarg; break;
+		case ALU_AND: case ALU_AND|0x8: res=dstarg&srcarg; break;
+		case ALU_OR: case ALU_OR|0x8: res=dstarg|srcarg; break;
 		case ALU_XOR: res=dstarg^srcarg; break;
 		case ALU_MOV:
 		default:
@@ -535,8 +541,8 @@ enum branch_rel_cond {
 	BCOND_CS,BCOND_CC,
 	BCOND_MS,BCOND_MC,
 	BCOND_ZS,BCOND_ZC,
-	BCOND_GTZ,BCOND_LEZ,
-	BCOND_LTZ,BCOND_GEZ,
+	BCOND_GTZ,BCOND_GEZ,
+	BCOND_LTZ,BCOND_LEZ,
 	BCOND_XS0, BCOND_XS1,
 	BCOND_XS2, BCOND_XS3,
 	BCOND_0x1e, BCOND_0x1f
@@ -546,7 +552,7 @@ enum branch_rel_cond {
 void flow_cond_rel(uint8_t op, int8_t offset) {
 	uint8_t res=0;
 	/* Handle logical pairs */
-	if((op&0xf)<BCOND_XS0) {
+	if((op&0xf)<BCOND_GTZ) {
 		switch(op&0xe) {
 			case BCOND_CS: res=(status.C)?1:0; break;
 			case BCOND_MS: res=(status.M)?1:0; break;
@@ -554,14 +560,16 @@ void flow_cond_rel(uint8_t op, int8_t offset) {
 			// These would require the overflow flag, which doesn't appear to be used in practice
 			//case BCOND_LT: res=(status.Z)?0:((status.M^status.V)?1:0); break;
 			//case BCOND_GT: res=(status.Z)?0:((status.M^status.V)?0:1); break;
-			case BCOND_GTZ: res=(status.Z)?0:(status.M)?0:1; break;
-			case BCOND_LTZ: res=(status.Z)?0:(status.M)?1:0; break;
 		}
 		/* Inverted versions of the above */
 		res=(op&0x01)?(res?0:1):(res?1:0);
 	} else {
 	/* Handle the remaining ops */
 		switch(op&0xf) {
+			case BCOND_GTZ: res=(status.Z)?0:(status.M)?0:1; break;
+			case BCOND_GEZ: res=(status.Z)?1:(status.M)?0:1; break;
+			case BCOND_LTZ: res=(status.Z)?0:(status.M)?1:0; break;
+			case BCOND_LEZ: res=(status.Z)?1:(status.M)?1:0; break;
 			case BCOND_XS0:
 			case BCOND_XS1:
 			case BCOND_XS2:
@@ -1162,9 +1170,44 @@ uint8_t mmio_mux_writeb(uint16_t ioaddr, uint8_t val) {
 	}
 }
 
+uint8_t diag_dp[4];
+uint8_t diag_digits;
+uint8_t diag_digits_en;
+uint8_t diag_dips;
 
-int main() {
-	stderr=stdout;
+uint8_t mmio_diag_readb(uint16_t ioaddr) {
+	switch(ioaddr&0x001f) {
+		case 0x10:
+			printf("MMIO Diag reading DIP switches: %0x\n",diag_dips);
+			return(diag_dips); /* Read DIP switches */
+	}
+}
+uint8_t mmio_diag_writeb(uint16_t ioaddr, uint8_t val) {
+	switch(ioaddr&0x001f) {
+		case 0x6: diag_digits_en=1; break; /* Unblank hex displays */
+		case 0x7: diag_digits_en=0; break; /* Blank hex displays */
+		case 0x8: case 0xa: case 0xc: case 0xe:
+			diag_dp[((ioaddr&0xf)>>1)-4]=1; break;
+		case 0x9: case 0xb: case 0xd: case 0xf:
+			diag_dp[((ioaddr&0xf)>>1)-4]=0; break;
+		case 0x10: diag_digits=val; break;
+	}
+}
+
+int main(int argc, char *argv[] ) {
+	int opt;
+	while((opt = getopt(argc,argv,"T:D")) != -1) {
+		switch(opt) {
+			case 'T': diag_dips=strtol(optarg,NULL,0); break;
+			case 'D':  stderr=stdout; break;
+			case '?':
+				if(optopt=='T') {
+					printf("\n-T option requires test number.\n");
+				}
+				break;
+		}
+	}
+	// if(argc>1) { diag_dips=strtol(argv[1],NULL,0); }
 	cpuregs=&(mem->r);
 	cpuregset=&(cpuregs->i[0]);
 	read_roms();
