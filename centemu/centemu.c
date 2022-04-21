@@ -118,7 +118,7 @@ static inst_base_t ib_bf={"b",OT_FLOW_COND,DS_BIT,AREL,{
 }};
 
 static inst_base_t ib_b={"b",OT_FLOW_COND,DS_N,AREL,{
-	{"lt",0x16,0x00},{"ge",0x17,0x00},{"gt",0x18,0x00},{"le",0x19,0x00},
+	{"gtz",0x16,0x00},{"lez",0x17,0x00},{"ltz",0x18,0x00},{"gez",0x19,0x00},
 	{"xs0",0x1a,0x00}, {"xs1",0x1b,0x00},{"xs2",0x1c,0x00},{"xs3",0x1d,0x00},
 	{"b0x1e",0x1e,0x00},{"b0x1f",0x1f,0x00},{0,0,0}
 }};
@@ -535,8 +535,8 @@ enum branch_rel_cond {
 	BCOND_CS,BCOND_CC,
 	BCOND_MS,BCOND_MC,
 	BCOND_ZS,BCOND_ZC,
-	BCOND_LT,BCOND_GE,
-	BCOND_GT,BCOND_LE,
+	BCOND_GTZ,BCOND_LEZ,
+	BCOND_LTZ,BCOND_GEZ,
 	BCOND_XS0, BCOND_XS1,
 	BCOND_XS2, BCOND_XS3,
 	BCOND_0x1e, BCOND_0x1f
@@ -551,8 +551,11 @@ void flow_cond_rel(uint8_t op, int8_t offset) {
 			case BCOND_CS: res=(status.C)?1:0; break;
 			case BCOND_MS: res=(status.M)?1:0; break;
 			case BCOND_ZS: res=(status.Z)?1:0; break;
-			case BCOND_LT: res=(status.Z)?0:((status.M^status.V)?1:0); break;
-			case BCOND_GT: res=(status.Z)?0:((status.M^status.V)?0:1); break;
+			// These would require the overflow flag, which doesn't appear to be used in practice
+			//case BCOND_LT: res=(status.Z)?0:((status.M^status.V)?1:0); break;
+			//case BCOND_GT: res=(status.Z)?0:((status.M^status.V)?0:1); break;
+			case BCOND_GTZ: res=(status.Z)?0:(status.M)?0:1; break;
+			case BCOND_LTZ: res=(status.Z)?0:(status.M)?1:0; break;
 		}
 		/* Inverted versions of the above */
 		res=(op&0x01)?(res?0:1):(res?1:0);
