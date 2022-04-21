@@ -566,7 +566,8 @@ void flow_cond_rel(uint8_t op, int8_t offset) {
 			case BCOND_XS1:
 			case BCOND_XS2:
 			case BCOND_XS3:
-			       	res=(sense[op&0x3])?1:0; break;
+				printf("\nChecking if sense[%x] is set: %x .\n", (op&0xf)-BCOND_XS0, sense[(op&0xf)-BCOND_XS0]);
+			       	res=(sense[(op&0xf)-BCOND_XS0])?1:0; break;
 			default: break;
 		}
 	}
@@ -998,7 +999,7 @@ void execute_instruction() {
 	if(autoidx_delta>0) { reg_writew(autoidx_reg,reg_readw(autoidx_reg)+1); }
 }
 
-#define NUMROMS 1
+#define NUMROMS 5
 typedef struct ROMfile_t {
 	char *filename;
 	uint8_t bank;
@@ -1008,7 +1009,14 @@ typedef struct ROMfile_t {
 	uint64_t addr_bitsalad;
 } ROMfile_t;
 
-static ROMfile_t ROMS[] = {{"Bootstrap.rom",0,0xfc00,0x0200,1,0xfedcba9765843210LL}};
+static ROMfile_t ROMS[] = {
+	{"Bootstrap.rom",0,0xfc00,0x0200,1,0xfedcba9765843210LL},
+	{"Diag/Diag_F1_Rev_1.0.BIN",0,0x8000,0x0800,0,0},
+	{"Diag/Diag_F2_Rev_1.0.BIN",0,0x8800,0x0800,0,0},
+	{"Diag/Diag_F3_Rev_1.0.BIN",0,0x9000,0x0800,0,0},
+	{"Diag/Diag_F4_1133CMD.BIN",0,0x9800,0x0800,0,0},
+	{0,0,0,0,0,0}
+};
 
 /* Utility functions to extract ranges of bits */
 #define BITRANGE(d,s,n) ((d>>s) & ((2LL<<(n-1))-1) )
@@ -1023,13 +1031,15 @@ uint16_t bitsalad_16(uint64_t order, uint16_t d) {
 }
 
 int read_roms() {
+	int i=0;
         FILE *fp;
 	char *filename;
         size_t ret_code;
 	uint16_t ROMSIZE, pos;
 	uint8_t buf[0x10000];
 
-        for(int  i=0; i<NUMROMS; i++) {
+        //for(int  i=0; i<NUMROMS; i++) {
+        for(i=0; ROMS[i].filename; i++) {
 		ROMSIZE=ROMS[i].size;
 		filename=ROMS[i].filename;
                 fp=fopen(filename,"rb");
@@ -1059,7 +1069,7 @@ int read_roms() {
 		}
 
         }
-        return(NUMROMS);
+        return(i);
 
 }
 /* MUX Ports (N) with input and output lines */
@@ -1165,6 +1175,7 @@ int main() {
 	mem->a[0x102]=0x22;
 	PC=0xfc00;
 	halted=0;
+	sense[0]=1;
 	while(!halted) {
 		fetch_instruction();
 		fprintf(stderr,"%#06x: %02x %s %02x\n",cinst.address, cinst.opcode, cinst.mnemonic, cinst.argc?cinst.argc>1?ntohs(cinst.argw):cinst.args[0]:0);
