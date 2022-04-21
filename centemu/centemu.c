@@ -812,12 +812,13 @@ void parse_cinst_opcode() {
 							cinst.srcreg=NAME2REG(tmpname);
 							tmpname[0]=*(n->node+1);
 							cinst.dstreg=NAME2REG(tmpname);
-							break;
 						} else {
-						       cinst.srcreg=NAME2REG("b");
+						       cinst.srcreg=NAME2REG("a");
+						       cinst.dstreg=NAME2REG("b");
 						}
+						break;
 					case OT_ALU1:
-						       cinst.dstreg=NAME2REG("a"); 
+						      cinst.dstreg=NAME2REG("a");
 						      break;
 					default: break;    
 				}
@@ -1150,7 +1151,7 @@ uint8_t mmio_mux_writeb(uint16_t ioaddr, uint8_t val) {
 
 
 int main() {
-
+	stderr=stdout;
 	cpuregs=&(mem->r);
 	cpuregset=&(cpuregs->i[0]);
 	read_roms();
