@@ -23,6 +23,7 @@
 
 #define TRAP(address, ... ) { fprintf(stderr,"\nTRAP at address %#06x:",address); fprintf(stderr, __VA_ARGS__); halted=1; }
 
+char *REG2NAME(uint8_t reg, uint8_t size);
 uint8_t mmio_mux_writeb(uint16_t ioaddr, uint8_t val);
 uint8_t mmio_mux_readb(uint16_t ioaddr);
 uint8_t mmio_diag_writeb(uint16_t ioaddr, uint8_t val);
@@ -367,7 +368,8 @@ void alu_op1regb(uint8_t op, uint8_t reg, uint8_t opt) {
 	/* Set zero and minus flags appropriately*/
 	status.Z=res?0:1;
 	status.M=(res&0x80)?1:0;
-	fprintf(stderr,"\nALU1b: r[%0x]=%0x opt=%0x op=%0x, res=%0x\n",reg,arg,opt,op,res);
+	fprintf(stderr,"\nALU1b: reg[%s]=%#04x opt=%#04x op=%02x, res=%#04x\n",
+			REG2NAME(reg,DS_B),arg, opt, op,res);
 	reg_writeb(reg,res);
 	return;
 }
@@ -397,7 +399,8 @@ void alu_op1regw(uint8_t op, uint8_t reg, uint8_t opt) {
 	/* Set zero and minus flags appropriately*/
 	status.Z=res?0:1;
 	status.M=(res&0x8000)?1:0;
-	fprintf(stderr,"\nALU1w: r[%0x]=%0x opt=%0x op=%0x, res=%0x\n",reg,arg,opt,op,res);
+	fprintf(stderr,"\nALU1w: reg[%s]=%#06x opt=%#04x, op=%02x, res=%#06x\n",
+			REG2NAME(reg,DS_W),arg, opt, op,res);
 	
 	reg_writew(reg,res);
 	return;
@@ -434,7 +437,8 @@ void alu_op2regb(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
 	/* Set zero and minus flags appropriately*/
 	status.Z=res?0:1;
 	status.M=(res&0x80)?1:0;
-	fprintf(stderr,"\nALU2b: srcrreg[%0x]=%0x dstreg[%0x]=%0x op=%0x, res=%0x\n",srcreg,srcarg,dstreg,dstarg,op,res);
+	fprintf(stderr,"\nALU2b: srcrreg[%s]=%#04x dstreg[%s]=%#04x op=%02x, res=%#04x\n",
+			REG2NAME(srcreg,DS_B),srcarg, REG2NAME(dstreg,DS_B),dstarg, op,res);
 	 
 	reg_writeb(dstreg,res);
 	return;
@@ -471,7 +475,8 @@ void alu_op2regw(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
 	/* Set zero and minus flags appropriately*/
 	status.Z=res?0:1;
 	status.M=(res&0x8000)?1:0;
-	fprintf(stderr,"\nALU2w: srcrreg[%0x]=%0x dstreg[%0x]=%0x op=%0x, res=%0x\n",srcreg,srcarg,dstreg,dstarg,op,res);
+	fprintf(stderr,"\nALU2w: srcrreg[%s]=%#06x dstreg[%s]=%#06x op=%02x, res=%#06x\n",
+			REG2NAME(srcreg,DS_W),srcarg, REG2NAME(dstreg,DS_W),dstarg, op,res);
 	 
 	reg_writew(dstreg,res);
 	return;
@@ -582,7 +587,7 @@ void flow_cond_rel(uint8_t op, int8_t offset) {
 	/* If the result is true, add the specified offset to the PC */
 	if(res){
 		PC=(uint16_t)(PC+(int8_t)offset);
-		fprintf(stderr,"\n Jumping to %04x\n",PC);
+		fprintf(stderr,"\n Branching to %#06x\n",PC);
 	}
 	return;
 }
@@ -590,7 +595,7 @@ void flow_cond_rel(uint8_t op, int8_t offset) {
 /* Unconditional branch instructions */
 void flow_jump(uint16_t dst) {
 	PC=dst;
-	fprintf(stderr,"\n Jumping to %04x\n",PC);
+	fprintf(stderr,"\n Jumping to %#06x\n",PC);
 	return;
 }
 
@@ -635,7 +640,9 @@ typedef struct cinst_t {
 	uint8_t data_type; /* none = 0, byte = 1, word = 2 */
 	uint8_t amode_type; /* Addressing mode type */
 	uint8_t amode; /* Addressing mode */
-	uint8_t idxmode; /* Autoindex mode (pre/post inc/dec) */
+	uint8_t autoidx_mode; /* Autoindex mode (pre/post inc/dec) */
+	uint8_t autoidx_reg; /* Autoindex register */
+	uint8_t autoidx_delta; /* Autoindex delta */
 	uint8_t indirects; /* Number of levels of indirection */
 	uint8_t dsttype; /* 0 - register/NA, 1 - memory address */
 	uint8_t dstreg; /* Destination register */
@@ -646,6 +653,7 @@ typedef struct cinst_t {
 	uint16_t value; /* Argument value */
 	int8_t offset; /* Relative offset */
 	char mnemonic[8]; /* assembly mnemonic */
+	char argtext[16]; /* assembly text for arguments */
 } cinst_t;
 cinst_t cinst;
 
@@ -718,11 +726,13 @@ void put_valueb(uint8_t indirects, uint8_t dsttype, uint16_t dst, uint8_t val) {
 }
 
 void put_valuew(uint8_t indirects, uint8_t dsttype, uint16_t dst, uint16_t val) {
+	fprintf(stderr,"Putting word value: indirects=%u, dsttype=%u, dst=%#06x\n",indirects,dsttype,dst);
 	/* Special case register direct where we only want to store a word to the reg */
 	if(indirects==1&&!dsttype){ return(reg_writew(dst&0xf, val)); }
 	while(indirects--){
 		if(dsttype++) { dst=( (mem_readb(dst)<<8) + mem_readb(dst+1) ); }
 		else { dst=reg_readw((dst&0xf)); }
+		fprintf(stderr,"             value: indirects=%u, dsttype=%u, dst=%#06x\n",indirects,dsttype,dst);
 	}
 	mem_writeb(dst,(val&0xff00)>>8);
 	mem_writeb(dst+1,(val&0x00ff));
@@ -767,7 +777,7 @@ char *REG2NAME(uint8_t reg, uint8_t size) {
 	}	    
 }
 uint8_t NAME2REG(char * regname) {
-	fprintf(stderr,"Looking up number for register '%s' (%0x)",regname,*regname);
+	//fprintf(stderr,"Looking up number for register '%s' (%0x)",regname,*regname);
 	uint8_t reg=0;
 	char *c=regname;
 	unsigned char l=tolower(*(c++));
@@ -789,10 +799,10 @@ uint8_t NAME2REG(char * regname) {
 	}
 	switch(*c) {
 		case '0': case 'H': case 'h':
-			fprintf(stderr," found %u(H)",reg);
+			//fprintf(stderr," found %u(H)",reg);
 			return(reg); break;
 		case '1': case 'L': case 'l': default:
-			fprintf(stderr," found %u(L)",reg+1);
+			//fprintf(stderr," found %u(L)",reg+1);
 			return(reg+1); break;
 	}
 }
@@ -841,7 +851,8 @@ void parse_cinst_opcode() {
 				cinst.amode=((cinst.opcode)&(amtp->mask)&(n->mask))>>amtp->shift; /* Get address mode */
 				/* Parse the addressing mode */
 				parse_cinst_amode();
-				cinst.idxmode=0;
+				cinst.argtext[0]='\0';
+				cinst.autoidx_mode=0;
 				mod=(cinst.data_type==DS_BIT)?
 						(n->mask?mn_flag_mods[cinst.opcode&0x1]:mn_data_size_mods[DS_N])
 						 :mn_data_size_mods[cinst.data_type];
@@ -859,6 +870,7 @@ found:
 
 }
 
+
 /* Fetch an instruction from memory */
 void fetch_instruction() {
 	uint8_t n=0;
@@ -867,28 +879,108 @@ void fetch_instruction() {
 
 	/* Read the opcode from memory */
 	cinst.opcode=mem_readb(cinst.address);
-	fprintf(stderr,"%#06x %02x", cinst.address,cinst.opcode);
+	//fprintf(stderr,"\n%#06x %02x", cinst.address,cinst.opcode);
 	/* Parse the opcode */
 	parse_cinst_opcode();
 
 	/* Capture additional argument bytes */
 	while(n<cinst.argc) {
 		cinst.args[n]=mem_readb(PC++);
-		fprintf(stderr," %02x", cinst.args[n]);
+		//fprintf(stderr," %02x", cinst.args[n]);
 		n++;
 	}
-	fprintf(stderr,"\n");
+	//fprintf(stderr,"\n");
 	return;
 }
 
+void parse_argtext() {
+	uint8_t tmpreg=0;
+	uint16_t tmpaddr=0;
+	char *pre, *post;
+	tmpreg=(cinst.op_type==OT_LOAD)? cinst.srcreg : cinst.dstreg;
+	tmpaddr=(cinst.op_type==OT_LOAD)? cinst.srcaddr : cinst.dstaddr;
 
-void execute_instruction() {
+	switch(cinst.amode_type) {
+		case AREL:
+			snprintf(cinst.argtext,sizeof(cinst.argtext),
+				"PC%c%#04x",cinst.offset<0?'-':'+',cinst.offset<0?-cinst.offset:cinst.offset);
+			break;
+		case AALU:
+			if(cinst.argc) {
+				if(cinst.op_type==OT_ALU2) {
+					snprintf(cinst.argtext,sizeof(cinst.argtext), "%s, %s",
+						REG2NAME(cinst.dstreg,cinst.data_type),
+						REG2NAME(cinst.srcreg,cinst.data_type) );
+				} else if(cinst.value) {
+					snprintf(cinst.argtext,sizeof(cinst.argtext), "%s, %#04x",
+						REG2NAME(cinst.dstreg,cinst.data_type),
+						cinst.value );
+				} else {
+					snprintf(cinst.argtext,sizeof(cinst.argtext), "%s",
+						REG2NAME(cinst.dstreg,cinst.data_type) );
+				}
+			}
+			break;
+		case AMEM:
+			switch(cinst.amode) {
+				case IMMEDIATE:
+					snprintf(cinst.argtext,sizeof(cinst.argtext),
+						cinst.data_type==DS_W?"#%#06x":"#%#04x",
+						cinst.value);
+					break;
+				case MEM_DIRECT:
+					snprintf(cinst.argtext,sizeof(cinst.argtext),
+						"%#06x", tmpaddr);
+					break;
+				case MEM_INDIRECT:
+					snprintf(cinst.argtext,sizeof(cinst.argtext),
+						"(%#06x)", tmpaddr);
+					break;
+				case PCREL_DIRECT:
+					snprintf(cinst.argtext,sizeof(cinst.argtext),
+						"PC%c%#04x",cinst.offset<0?'-':'+',cinst.offset<0?-cinst.offset:cinst.offset);
+					break;
+				case PCREL_INDIRECT:
+					snprintf(cinst.argtext,sizeof(cinst.argtext),
+						"PC%c%#04x",cinst.offset<0?'-':'+',cinst.offset<0?-cinst.offset:cinst.offset);
+					break;
+				case REG_INDIRECT_AUTOIDX:
+					switch(cinst.autoidx_mode) {
+						case 0:pre="";post=""; break;
+						case 1:pre="";post="+"; break;
+						case 2:pre="-";post=""; break;
+						default: pre="??"; post="??"; break;
+					}
+					snprintf(cinst.argtext,sizeof(cinst.argtext), "%s(%s)%s",
+						pre,REG2NAME(cinst.autoidx_reg,DS_W),post);
+					break;
+				case IMP_REG_A_INDIRECT:
+				case IMP_REG_B_INDIRECT:
+				case IMP_REG_X_INDIRECT:
+				case IMP_REG_Y_INDIRECT:
+				case IMP_REG_Z_INDIRECT:
+				case IMP_REG_S_INDIRECT:
+				case IMP_REG_F_INDIRECT:
+				case IMP_REG_PC_INDIRECT:
+					snprintf(cinst.argtext,sizeof(cinst.argtext), "(%s)",
+						REG2NAME(tmpreg,DS_W));
+					break;
+				default:
+					snprintf(cinst.argtext,sizeof(cinst.argtext), "??%s??",
+						REG2NAME(tmpreg,DS_W));
+					break;
+				break;
+			}
+
+	}
+}
+void prepare_instruction() {
 	uint8_t tmpreg=0;
 	int8_t autoidx_delta=0;
 	uint8_t autoidx_reg=0;
-	uint16_t tmpaddr=0,tmpsrc,tmpdst,tmpvalue;
+	uint16_t tmpaddr=0;
 	char srcname,dstname;
-	fprintf(stderr,"amode_type: %x ",cinst.amode_type);
+	// fprintf(stderr,"amode_type: %x\n",cinst.amode_type);
 	switch(cinst.amode_type){
 		case AREL:
 			cinst.offset=(int8_t)(cinst.args[0]);
@@ -921,15 +1013,16 @@ void execute_instruction() {
 					break;
 				case REG_INDIRECT_AUTOIDX:
 					tmpreg=(cinst.args[0]&0xf0)>>4;
-					cinst.idxmode=(cinst.args[0]&0x0f);
-					autoidx_reg=tmpreg;
-					if(cinst.idxmode>2) {
+					cinst.autoidx_mode=(cinst.args[0]&0x0f);
+					cinst.autoidx_reg=tmpreg;
+					if(cinst.autoidx_mode>2) {
 					TRAP(cinst.address,
 						"Unknown auto-index mode specified for register %s: %x",
-						regnames16[tmpreg>>1],cinst.idxmode
+						regnames16[tmpreg>>1],cinst.autoidx_mode
 					);}
-					autoidx_delta=!cinst.idxmode?0:cinst.idxmode&1?1:cinst.idxmode&2?-1:42;
-					fprintf(stderr,"Autoindexing register %0x with delta %i",autoidx_reg,autoidx_delta);
+					cinst.autoidx_delta=!cinst.autoidx_mode?0:cinst.autoidx_mode&1?1:cinst.autoidx_mode&2?-1:42;
+					fprintf(stderr,"Autoindexing register %0x with delta %i\n",
+							cinst.autoidx_reg,cinst.autoidx_delta);
 					break;
 				case IMP_REG_A_INDIRECT: tmpreg=0x0; break;
 				case IMP_REG_B_INDIRECT: tmpreg=0x2; break;
@@ -945,6 +1038,7 @@ void execute_instruction() {
 						cinst.opcode);
 				break;
 			}
+
 			cinst.indirects=amodes_mem[cinst.amode].indirects;
 			if(cinst.op_type==OT_LOAD) {
 				cinst.srctype=amodes_mem[cinst.amode].type;
@@ -959,7 +1053,10 @@ void execute_instruction() {
 
 	}
 
-	if(autoidx_delta<0) { reg_writew(autoidx_reg,reg_readw(autoidx_reg)-1); }
+}
+void execute_instruction() {
+	uint16_t tmpsrc,tmpdst,tmpvalue;
+	if(cinst.autoidx_delta<0) { reg_writew(cinst.autoidx_reg,reg_readw(cinst.autoidx_reg)-1); }
 	switch(cinst.op_type) {
 		case OT_SYS:
 			sys_func(cinst.opcode); break;
@@ -983,7 +1080,7 @@ void execute_instruction() {
 			/* Indirection level: 0=immediate,1=direct,2+=indirect
 			 * Source type: 0=register, 1=address */
 			tmpsrc=cinst.indirects?cinst.srctype?cinst.srcaddr:cinst.srcreg:cinst.value;
-			fprintf(stderr,"Loading reg %0x from %0x\n",cinst.dstreg,tmpsrc);
+			fprintf(stderr,"Loading reg %0x from %#0x\n",cinst.dstreg,tmpsrc);
 
 			if (cinst.data_type==DS_W) {
 				tmpvalue=get_valuew(cinst.indirects, cinst.srctype, tmpsrc);
@@ -999,12 +1096,12 @@ void execute_instruction() {
 
 		case OT_STORE:
 			tmpdst=cinst.indirects?cinst.dsttype?cinst.dstaddr:cinst.dstreg:cinst.value;
-			fprintf(stderr,"Storing %0x from reg %0x\n",tmpdst, cinst.srcreg);
+			fprintf(stderr,"Storing %#0x from reg %0x\n",tmpdst, cinst.srcreg);
 			if (cinst.data_type==DS_W) { put_valuew(cinst.indirects, cinst.dsttype, tmpdst,reg_readw(cinst.srcreg)); }
 			else { put_valueb(cinst.indirects, cinst.dsttype, tmpdst,reg_readb(cinst.srcreg)); }
 			break;
 	}
-	if(autoidx_delta>0) { reg_writew(autoidx_reg,reg_readw(autoidx_reg)+1); }
+	if(cinst.autoidx_delta>0) { reg_writew(cinst.autoidx_reg,reg_readw(cinst.autoidx_reg)+1); }
 }
 
 #define NUMROMS 5
@@ -1221,8 +1318,18 @@ int main(int argc, char *argv[] ) {
 	sense[0]=1;
 	while(!halted) {
 		fetch_instruction();
-		fprintf(stderr,"%#06x: %02x %s %02x\n",cinst.address, cinst.opcode, cinst.mnemonic, cinst.argc?cinst.argc>1?ntohs(cinst.argw):cinst.args[0]:0);
+		prepare_instruction();
+		parse_argtext();
+		fprintf(stderr,"\n%#06x: %02x",cinst.address, cinst.opcode);
+		switch(cinst.argc){
+			case 0: fprintf(stderr,"      "); break;
+			case 1: fprintf(stderr," %02x   ", cinst.args[0] ); break;
+			case 2: fprintf(stderr," %02x %02x", cinst.args[0], cinst.args[1] ); break;
+		}
+		fprintf(stderr,"\t%s\t%s\n", cinst.mnemonic, cinst.argtext);
+		//fprintf(stderr,"%02x\n", cinst.argc?cinst.argc>1?ntohs(cinst.argw):cinst.args[0]:0);
 		execute_instruction();
+
 		fprintf(stderr,"Status word:[%c%c%c%c]\n",status.C?'C':' ',status.Z?'Z':' ',status.V?'V':' ',status.M?'M':' ');
 	}
 	mem->a[0x0200]='H';
