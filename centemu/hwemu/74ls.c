@@ -1,14 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
-typedef enum clock_state {
-	CLK_LO=0x0 /* b00 */,
-	CLK_LH=0x1 /* b01 */,
-	CLK_HI=0x3 /* b11 */,
-	CLK_HL=0x2 /* b10 */
-} clock_state_t;
-
-#define S_(sig) (*(dev->sig))
-#define I_(state) (dev->state)
+#include "logic-common.h"
+#include "clockline.h"
 
 #define _74(part) logic_74 ## part
 #define d_74(part) logic_74 ## part (logic_74 ## part ## _device_t *dev)
@@ -16,11 +9,6 @@ typedef enum clock_state {
 #define dstruct_74(part) struct logic_74 ## part ## _device_t
 #define dtd_74(part,alias) typedef struct logic_74 ## part ## _device_t logic_74 ## alias ## _device_t
 #define dalias_74(part,alias) (*logic_74 ## alias)(dt_74(alias) *dev)=_74(part);
-
-#define OC_OUTPUT(output, ...) output = ( output & __VA_ARGS__ )
-#define TRI_OUTPUT(output,cond, ...) if(cond) { output = ( __VA_ARGS__ ); }
-
-typedef enum BIT { LO=0, LOW=0, HI=1, HIGH=1, HiZ=-128, HIZ=-128, HighZ=-128, HIGHZ=-128 } bit_t;
 
 /* 74LS00 Series NAND/NOR Gates */
 

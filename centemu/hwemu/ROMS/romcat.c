@@ -10,7 +10,6 @@
 uint8_t allrom[NUMROMS][ROMSIZE];
 uint8_t mergedrom[ROMSIZE][NUMROMS];
 uint64_t iws[ROMSIZE];
-//char iws_binarytext[ROMSIZE][NUMROMS*10];
 static char *ROM_files[NUMROMS] = {
 	"CPU_5.rom", /* MWK3.11 - A3.11 */
 	"CPU_2.rom", /* MWF3.11 - B3.11 */
@@ -30,6 +29,8 @@ static char *ROM_files[NUMROMS] = {
 	"CPU_7.rom"
 };
 */
+
+/* Concatenate an array of bytes into an unsigned 64-bit int */
 uint64_t concat_bytes(uint8_t bytes[]){
 	uint64_t out=0,in;
 	for(int i=0;i<NUMROMS;i++) {
@@ -39,6 +40,7 @@ uint64_t concat_bytes(uint8_t bytes[]){
 	}
 	return(out);
 }
+
 uint64_t bitreverse_64(uint64_t in) {
 	uint64_t out=0;
 	for(int i=63;i>=0;i--) {
@@ -117,8 +119,29 @@ int merge_roms() {
 
 	return(ROMSIZE);
 }
+/* Represent specified number of bits of a 64-bit integer as an ascii string of '1's, '0's and ' ' */
+/* Provide an output buffer long enough to hold all bits plus spaces between fields plus NULL */
+/* Split sequences of bits into fields of specified widths given as byte string ("\x2\x10\x8..") */
+char  *int64_bits_to_binary_string_fields(char *out, uint64_t in, uint8_t bits, char *fieldwidths) {
+	char *p;
+	char *f;
+	uint8_t fc=0;
+	f=fieldwidths;
+	p=out;
+	bits=bits<65?bits:64;
+	for(int i=bits-1; i>=0; i--) {
+		if(!fc && *f) { fc=*(f++); }
+		*(p++)=(in&(1LL<<i))?'1':'0';
+		if(!--fc){ *(p++)=' '; }
+	}
+	*p='\0';
+	return(out);
+}
 
-char  *int64_bits_to_binary_string(char *out, uint64_t in, uint8_t bits, uint8_t grouping) {
+/* Represent specified number of bits of a 64-bit integer as an ascii string of '1's and '0's */
+/* Provide an output buffer long enough to hold all bits plus spaces between fields plus NULL */
+/* Split sequences of bits into space separated groups of specified size */
+char  *int64_bits_to_binary_string_grouped(char *out, uint64_t in, uint8_t bits, uint8_t grouping) {
 	char *p;
 	p=out;
 	bits=bits<65?bits:64;
@@ -130,6 +153,7 @@ char  *int64_bits_to_binary_string(char *out, uint64_t in, uint8_t bits, uint8_t
 	return(out);
 }
 
+
 int main() {
 	uint16_t tmp;
 	uint64_t salad;
@@ -140,6 +164,7 @@ int main() {
 	for(int i=0; i<ROMSIZE; i++) {
 		printf("\n%04x",i);
 		int64_bits_to_binary_string(binstr, iws[i], NUMROMS*8,4);
+		int64_bits_to_binary_string_fields(binstr, iws[i], NUMROMS*8,"\x1\x2\x4\x6\x8\xa\xc\xe");
 		printf(" %#016"PRIx64" %s",iws[i],binstr);
 		printf(" 2901H: I=%03o",BITRANGE(iws[i],10,9));
 		printf(" 2909H: FE_PUP=%01o",BITRANGE_R(iws[i],28,2));

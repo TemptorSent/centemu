@@ -6,46 +6,55 @@ char *am2909_clock_edge_LH(am2909_device_t *dev) {
 	uint8_t O,SP;
 
 	/* Latch Ri into AR if RE_ is LOW */
-	if( !(*(dev->RE_)) ){ dev->AR=*(dev->Ri); }
+	if( !S_(RE_) ){ I_(AR)=oS_(Ri,S_(Di)); }
 
 	/* Select source to temp output O */
-	switch(*(dev->S)) {
-		case uPC: O=dev->uPC; break;
-		case AR: O=dev->AR; break;
-		case STK0: O=dev->STK[dev->SP]; break;
-		case Di: O=*(dev->Di); break;
+	switch(S_(S)) {
+		case uPC: O=I_(uPC); break;
+		case AR: O=I_(AR); break;
+		case STK0: O=dev->STK[I_(SP)]; break;
+		case Di: O=S_(Di); break;
 	}
 
 	/* Apply ZERO_ and ORi to O */
-	O=(*(dev->ZERO_)?O|*(dev->ORi):0);
+	O=(S_(ZERO_)?O|oS_(ORi,0):0);
 
 	/* Increment our uPC based on Cn and set Co if needed */
-	dev->uPC=(O+*(dev->Cn))&0xf;
-	*(dev->Co)=(*(dev->Cn)&&O==0xf)?1:0;
+	I_(uPC)=(O+S_(Cn))&0xf;
+	S_(Co)=(S_(Cn)&&O==0xf)?1:0;
 
 
 	/* Push/Pop as indicated by FE_ and PUP */
-	if(!*(dev->FE_)) {
-		SP=dev->SP;
-		if(*(dev->PUP)) {
-			dev->SP=(SP+1)&0x3;
-			dev->STK[dev->SP]=uPC;
+	if(!S_(FE_)) {
+		SP=I_(SP);
+		if(S_(PUP)) {
+			I_(SP)=(SP+1)&0x3;
+			dev->STK[I_(SP)]=uPC;
 		} else {
-			dev->SP=SP?SP-1:0x3;
+			I_(SP)=SP?SP-1:0x3;
 		}
 	}
 
 	/* Set output values Y if OE_ is LOW (HiZ=1) */
-	if(!*(dev->OE_)){*dev->Y=O;}
+	TRI_OUTPUT(S_(Y),!S_(OE_),O);
+	return(0);
 }
-//	am2909_seq_init(seq0,&S,&FE_,&PUP,&Di,&Ri,&RE_,&Cn,&Co,&ORi,&ZERO_,&OE_,&Y);
-int am2909_seq_init(am2909_device_t *dev,
-	enum am2909_source_code *S, uint8_t *FE_, uint8_t *PUP, /* Select operation */
-	uint8_t *Di, uint8_t *Ri, uint8_t *RE_, /* Direct and AR (when RE_ is LO) inputs */
-	uint8_t *Cn, uint8_t *Co, /* Incrementer carry in and carry out, Cn=1 increments uPC, Cn=0 repeats current op */
-	uint8_t *ORi, uint8_t *ZERO_, uint8_t *OE_, /* Outputs overrides: OE_=1->HiZ, ZERO_=0->Y=0, ORi=1->Yi=1 */
-	uint8_t *Y /* Outputs Yi of Y if not overridden by above */) {
-	dev->S=S;
+
+
+void am2909_update(am2909_device_t *dev) {
+	if(S_(clk)==CLK_LH) { am2909_clock_edge_LH(dev); }
+}
+
+//	am2909_init(seq0,id,&clk,&S,&FE_,&PUP,&Di,&Ri,&RE_,&Cn,&Co,&ORi,&ZERO_,&OE_,&Y);
+int am2909_init(am2909_device_t *dev, char* id,
+	clock_state_t *clk, /* Clock state from clockline */
+	twobit_t *S, bit_t *FE_, bit_t *PUP, /* Select operation */
+	nibble_t *Di, nibble_t *Ri, bit_t *RE_, /* Direct and AR (when RE_ is LO) inputs */
+	bit_t *Cn, bit_t *Co, /* Incrementer carry in and carry out, Cn=1 increments uPC, Cn=0 repeats current op */
+	nibble_t *ORi, bit_t *ZERO_, bit_t *OE_, /* Outputs overrides: OE_=1->HiZ, ZERO_=0->Y=0, ORi=1->Yi=1 */
+	nibble_t *Y /* Outputs Yi of Y if not overridden by above */) {
+	dev->clk=clk;
+	dev->S=(enum am2909_source_code *)S;
 	dev->FE_=FE_;
 	dev->PUP=PUP;
 	dev->Cn=Cn;
@@ -58,16 +67,36 @@ int am2909_seq_init(am2909_device_t *dev,
 	dev->ZERO_=ZERO_;
 	dev->OE_=OE_;
 	dev->Y=Y;
+	return(0);
+}
+typedef am2909_device_t am2911_device_t;
+int am2911_init(am2911_device_t *dev, char* id,
+	clock_state_t *clk, /* Clock state from clockline */
+	twobit_t *S, bit_t *FE_, bit_t *PUP, /* Select operation */
+	nibble_t *Di, bit_t *RE_, /* Direct and AR (when RE_ is LO) inputs */
+	bit_t *Cn, bit_t *Co, /* Incrementer carry in and carry out, Cn=1 increments uPC, Cn=0 repeats current op */
+	bit_t *ZERO_, bit_t *OE_, /* Outputs overrides: OE_=1->HiZ, ZERO_=0->Y=0, ORi=1->Yi=1 */
+	nibble_t *Y /* Outputs Yi of Y if not overridden by above */) {
+
+	return(am2909_init(dev,id,clk,S,FE_,PUP,Di,0,RE_,Cn,Co,0,ZERO_,OE_,Y));
 }
 
-int main() {
+void am2911_update(am2911_device_t *dev){ am2909_update(dev); }
+
+int main_am2909() {
 	am2909_device_t d0a={}, *seq0;
-	enum am2909_source_code S;
-	uint8_t FE_, PUP, Cn, Di, RE_, Ri;
-	uint8_t Co, ORi, ZERO_, OE_,Y;
+	clockline_t clockline, *cl;
+	clock_state_t *clk;
+	twobit_t S;
+	nibble_t Di, Ri, ORi, Y;
+	bit_t FE_, PUP, Cn, RE_;
+	bit_t Co, ZERO_, OE_;
+	char *seq0id="seq0";
 	seq0=&d0a;
-	
-	am2909_seq_init(seq0,&S,&FE_,&PUP,&Di,&Ri,&RE_,&Cn,&Co,&ORi,&ZERO_,&OE_,&Y);
+	cl=&clockline;
+	clk=&cl->clk;
+	clock_init(cl,"Sequencer Clockline",CLK_LO);
+	am2909_init(seq0,seq0id,clk,&S,&FE_,&PUP,&Di,&Ri,&RE_,&Cn,&Co,&ORi,&ZERO_,&OE_,&Y);
 /*
 	seq0->S=&S;
 	seq0->FE_=&FE_;
