@@ -426,13 +426,24 @@ void alu_op1regb(uint8_t op, uint8_t reg, uint8_t opt) {
 			      fprintf(stderr,"LSR[%x]: %x -> %x C=%u",reg,arg,res,status.C);break;
 		case ALU_LSL: res=arg<<(1+opt); status.C=((arg<<opt)&0x80)?1:0; break;
 		case ALU_RLC: /* Dup arg bits, shift up, take the high word and shift back down */
-			      tmp= ( ( (arg<<8|arg)<<(1+opt) )  & 0xff00 ) >> 8;
+			      /* 01234567C -> 1234567C01234567*/
+			      tmp=(arg << 8) | ((status.C&0x1) << 7) | (arg>>1);
+			      tmp<<=(1+opt);
+			      tmp=(tmp&0xff00)>>8;
+			      //tmp= ( ( (arg<<8|arg)<<(1+opt) )  & 0xff00 ) >> 8;
 			      res=(tmp&0xff);
 			      status.C= ( (arg<<opt) & 0x80 )?1:0; break;
+			      fprintf(stderr,"RLC[%s]: %x -> %x C=%u",REG2NAME(reg,DS_B),arg,res,status.C);
+			      break;
 		case ALU_RRC: /* Dup arg bits, shift down, take the low word */
-			      tmp= ( (arg<<8|arg) & 0x00ff ) >> (1+opt);
+			      tmp=(arg << 9) | ((status.C&0x1) << 8) | arg;
+			      tmp>>=(1+opt);
+			      tmp=tmp&0x00ff;
+			      //tmp= ( (arg<<8|arg) & 0x00ff ) >> (1+opt);
 			      res=(tmp&0xff);
-			      status.C= ( (arg>>opt) & 0x01 )?1:0; break;
+			      status.C= ( (arg>>opt) & 0x01 )?1:0;
+			      fprintf(stderr,"RLC[%s]: %x -> %x C=%u",REG2NAME(reg,DS_B),arg,res,status.C);
+			      break;
 	}
 	/* Set zero and minus flags appropriately*/
 	status.Z=res?0:1;
@@ -457,13 +468,23 @@ void alu_op1regw(uint8_t op, uint8_t reg, uint8_t opt) {
 		case ALU_LSR: res=arg>>(1+opt); status.C=((arg>>opt)&0x0001)?1:0; break;
 		case ALU_LSL: res=arg<<(1+opt); status.C=((arg<<opt)&0x8000)?1:0; break;
 		case ALU_RLC: /* Dup arg bits, shift up, take the high word and shift back down */
-			      tmp= ( ( (arg<<16|arg)<<(1+opt) ) & 0xffff0000 ) >> 16;
+			      tmp=(arg << 16) | ((status.C&0x1) << 15) | (arg >> 1);
+			      tmp<<=(1+opt);
+			      tmp=(tmp&0xffff0000)>>16;
+			      //tmp= ( ( (arg<<16|arg)<<(1+opt) ) & 0xffff0000 ) >> 16;
 			      res=(tmp&0xffff);
-			      status.C= ( (arg<<opt) & 0x8000 )?1:0; break;
+			      status.C= ( (arg<<opt) & 0x8000 )?1:0;
+			      fprintf(stderr,"RLC[%s]: %x -> %x C=%u",REG2NAME(reg,DS_W),arg,res,status.C);
+			      break;
 		case ALU_RRC: /* Dup arg bits, shift down, take the low word */
-			      tmp= ( (arg<<16|arg)>>(1+opt) ) & 0x0000ffff;
+			      tmp=(arg << 17) | ((status.C&0x1) << 16) | arg;
+			      tmp>>=(1+opt);
+			      tmp=tmp&0x0000ffff;
+			      //tmp= ( (arg<<16|arg)>>(1+opt) ) & 0x0000ffff;
 			      res=(tmp&0xffff);
-			      status.C= ( (arg>>opt) & 0x0001 )?1:0; break;
+			      status.C= ( (arg>>opt) & 0x0001 )?1:0;
+			      fprintf(stderr,"RRC[%s]: %x -> %x C=%u",REG2NAME(reg,DS_W),arg,res,status.C);
+			      break;
 	}
 	/* Set zero and minus flags appropriately*/
 	status.Z=res?0:1;
@@ -479,7 +500,7 @@ void alu_op1regw(uint8_t op, uint8_t reg, uint8_t opt) {
 void alu_op2regb(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
 	uint8_t srcarg,dstarg,res;
 	uint16_t tmp;
-	/* Read argument words from specified registers */
+	/* Read argument bytes from specified registers */
 	srcarg=reg_readb(srcreg);
 	dstarg=reg_readb(dstreg);
 
@@ -488,21 +509,28 @@ void alu_op2regb(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
 			tmp=dstarg+srcarg;
 			res=dstarg+srcarg;
 			status.C=(tmp&0x0100)?1:0;
-			status.V=(~((srcarg&0x80)^(dstarg&0x80)) & ((res&0x80)^(srcarg&0x80)))?1:0;
+			/* 2901 ALU sets overflow when C_n^C_(n-1) */
+			/* Check if src and dest have the same high bit */
+			/* Then see if there was a carry in to the high bit */
+			status.V=( (srcarg&0x80)==(dstarg&0x80) && (res&0x80)!=(srcarg&0x80))?1:0;
+			//status.V=(~((srcarg&0x80)^(dstarg&0x80)) & ((res&0x80)^(srcarg&0x80)))?1:0;
 			break;
 		case ALU_SUB: case ALU_SUB|0x8:
-			tmp=dstarg-srcarg;
-			res=dstarg-srcarg;
+			tmp=dstarg+~srcarg+1;
+			res=dstarg+~srcarg+1;
 			status.C=(tmp&0x0100)?1:0;
-			status.V=(~((res&0x80)^(dstarg&0x80)) & ((dstarg&0x80)^(srcarg&0x80)))?1:0;
+			status.V=( (srcarg&0x80)==(dstarg&0x80) && (res&0x80)!=(srcarg&0x80))?1:0;
+			//status.V=(~((res&0x80)^(dstarg&0x80)) & ((dstarg&0x80)^(srcarg&0x80)))?1:0;
 			break;
 		case ALU_AND: case ALU_AND|0x8: res=dstarg&srcarg; break;
 		case ALU_OR: case ALU_OR|0x8: res=dstarg|srcarg; break;
 		case ALU_XOR: res=dstarg^srcarg; break;
-		case ALU_MOV:
+		case ALU_MOV: res=srcarg; break;
 		default:
+			fprintf(stderr,"\nALU2b - Unknown operation number %#04x\n",op);
 			res=srcarg; break;
 	}
+
 	/* Set zero and minus flags appropriately*/
 	status.Z=res?0:1;
 	status.M=(res&0x80)?1:0;
@@ -520,25 +548,27 @@ void alu_op2regw(uint8_t op, uint8_t srcreg, uint8_t dstreg) {
 	/* Read argument bytes from specified registers */
 	srcarg=reg_readw(srcreg);
 	dstarg=reg_readw(dstreg);
-
-	switch(op&0x0f) {
-		case ALU_ADD: case ALU_ADD|0x8:
+	switch(op&0x07) {
+		case ALU_ADD:
 			tmp=dstarg+srcarg;
 			res=dstarg+srcarg;
 			status.C=(tmp&0x00010000)?1:0;
-			status.V=(~((srcarg&0x8000)^(dstarg&0x8000)) & ((res&0x8000)^(srcarg&0x8000)))?1:0;
+			status.V=( (srcarg&0x8000)==(dstarg&0x8000) && (res&0x8000)!=(srcarg&0x8000))?1:0;
+			//status.V=(~((srcarg&0x8000)^(dstarg&0x8000)) & ((res&0x8000)^(srcarg&0x8000)))?1:0;
 			break;
-		case ALU_SUB: case ALU_SUB|0x8:
-			tmp=dstarg-srcarg;
-			res=dstarg-srcarg;
+		case ALU_SUB:
+			tmp=dstarg+~srcarg+1;
+			res=dstarg+~srcarg+1;
 			status.C=(tmp&0x00010000)?1:0;
-			status.V=(~((res&0x8000)^(dstarg&0x8000)) & ((dstarg&0x8000)^(srcarg&0x8000)))?1:0;
+			status.V=( (srcarg&0x8000)==(dstarg&0x8000) && (res&0x8000)!=(srcarg&0x8000))?1:0;
+			//status.V=(~((res&0x8000)^(dstarg&0x8000)) & ((dstarg&0x8000)^(srcarg&0x8000)))?1:0;
 			break;
-		case ALU_AND: case ALU_AND|0x8: res=dstarg&srcarg; break;
-		case ALU_OR: case ALU_OR|0x8: res=dstarg|srcarg; break;
+		case ALU_AND: res=dstarg&srcarg; break;
+		case ALU_OR: res=dstarg|srcarg; break;
 		case ALU_XOR: res=dstarg^srcarg; break;
-		case ALU_MOV:
+		case ALU_MOV: res=srcarg; break;
 		default:
+			fprintf(stderr,"\nALU2w - Unknown operation number %#04x\n",op);
 			res=srcarg; break;
 	}
 	/* Set zero and minus flags appropriately*/
@@ -1141,8 +1171,13 @@ void execute_instruction() {
 			else { alu_op1regb(cinst.opcode, cinst.dstreg, cinst.value); }
 			break;
 		case OT_ALU2:
-			if (cinst.data_type==DS_W) { alu_op2regw(cinst.opcode, cinst.srcreg, cinst.dstreg); }
-			else { alu_op2regb(cinst.opcode, cinst.srcreg, cinst.dstreg); }
+			if (cinst.data_type==DS_W) {
+				if(cinst.amode_type==ATREG) { reg_movw(cinst.srcreg, cinst.dstreg); }
+				else { alu_op2regw(cinst.opcode, cinst.srcreg, cinst.dstreg); }
+			} else { 
+				if(cinst.amode_type==ATREG) { reg_movb(cinst.srcreg, cinst.dstreg); }
+				else { alu_op2regb(cinst.opcode, cinst.srcreg, cinst.dstreg); }
+			}
 			break;
 		case OT_LOAD:
 			/* Indirection level: 0=immediate,1=direct,2+=indirect
