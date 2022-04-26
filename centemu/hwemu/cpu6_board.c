@@ -194,13 +194,13 @@ struct cpu6_components {
 };
 
 static char *ROM_files[] = {
-	"ROMS/CPU_1.rom"  /* MWE3.11 - ??3.11 */
+	"ROMS/CPU_1.rom",  /* MWE3.11 - ??3.11 */
 	"ROMS/CPU_2.rom", /* MWF3.11 - B3.11 */
 	"ROMS/CPU_3.rom", /* MWH3.11 - C3.11 */
 	"ROMS/CPU_4.rom", /* MWJ3.11 - F3.11 */
 	"ROMS/CPU_5.rom", /* MWK3.11 - A3.11 */
 	"ROMS/CPU_6.rom", /* MWL3.11 - D3.11 */
-	"ROMS/CPU_7.rom", /* MWM3.11 - E3.11 */
+	"ROMS/CPU_7.rom" /* MWM3.11 - E3.11 */
 };
 
 #define C_(comp) (com.comp)
