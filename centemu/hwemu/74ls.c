@@ -160,8 +160,8 @@ void d_74(ls138) {
 
 /* 74LS139 Dual 2 bit 1-of-4 Line Decoders/Demultiplexers With Independent Enable Inputs (Active LO) */
 void d_74(ls139) {
-	S_(Y1)= S_(G1_) ? 0xff : ( 1<<(S_(BA1) & 0x3) ^ 0x0f );
-	S_(Y2)= S_(G2_) ? 0xff : ( 1<<(S_(BA2) & 0x3) ^ 0x0f );
+	S_(Y1)= S_(G1_) ? 0x0f : ( 1<<(S_(BA1) & 0x3) ^ 0x0f );
+	S_(Y2)= S_(G2_) ? 0x0f : ( 1<<(S_(BA2) & 0x3) ^ 0x0f );
 }
 
 /* 74LS151 Series Data Selectors/Multiplexers */

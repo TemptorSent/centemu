@@ -22,12 +22,22 @@ struct cpu6_signals {
 		byte_t uD[7]; /* uD0-uD55 Microcode ROM Data lines */
 		bit_t CE1_, CE2, CE3; /* Chip enable lines, enabled when CE1_=0, CE2=1, CE3=1 */
 	} uROM;
+
 	/* Microcode Instruction Word Register */
        	/* Latches last 6 bytes from ROMS with bitsalad=0x76234510 on incoming data lines */
 	struct uIWR {
 		byte_t uD[6];
 		byte_t uQ[6];
 	} uIWR;
+
+	/* Decode logic for output from UE3 (ROM6) of instruction word uROM (logical bits 0-8) */
+	struct uIW6D {
+		octal_t D210; /* Address to DeMUX on UD3 (3-8) and UD2A (2-4) */
+		bit_t DeMUXSel; /* (D3) Select between DeMUX UD3 (HI) and UD2A (LO) */
+		nibble_t D7654; /* High nibble to latch in UE5 */
+		nibble_t uIW6D0O; /* Eye-test! Output of UD2A */
+		fivebit_t uIW6D1O; /* Output of UD3 */ 
+	} uIW6D;
 
 	struct Seqs {
 		twobit_t S[2]; /* Source select (2 bits)*/
@@ -78,16 +88,16 @@ struct cpu6_components {
 		struct { logic_74ls377_device_t uIL0, uIL1, uIL2, uIL3, uIL4, uIL5; };
 	};
 
-	/* uI High byte decode (ROM6)*/
+	/* uIW6 Decoder (ROM6)*/
 	union {
-		struct { logic_74ls138_device_t UD3; logic_74ls139_device_t UD2; };
-		struct { logic_74ls138_device_t uI6D0; logic_74ls139_device_t uI6D1; };
+		struct { logic_74ls138_device_t UD2; logic_74ls139_device_t UD3; };
+		struct { logic_74ls138_device_t uIW6D1; logic_74ls139_device_t uIW6D0; };
 	};
 
-	/* uI High byte latches  */
+	/* uIW6 Decoder Output latches  */
 	union {
 		struct { logic_74ls174_device_t UD5, UD4, UE5; };
-		struct { logic_74ls174_device_t uIL6A, uIL6B, uIL6C; };
+		struct { logic_74ls174_device_t uIW6DL0, uIW6DL1, uIW6DL2; };
 	};
 
 	/* Sequencers */
@@ -213,8 +223,27 @@ int main(int argc, char *argv[]) {
 	am2901_device_t alu0, alu1;
 	am2909_device_t seq0, seq1, seq2;
 
+	bit_t NullBit=0;
+	twobit_t NullTwobit=0;
+	octal_t NullOctal=0;
+	nibble_t NullNibble=0;
 	byte_t NullByte=0;
 	word_t NullWord=0;
+
+	bit_t OneBit=0;
+	twobit_t OneTwobit=0;
+	octal_t OneOctal=0;
+	nibble_t OneNibble=0;
+	byte_t OneByte=0;
+	word_t OneWord=0;
+	
+	bit_t UnaBit=0;
+	twobit_t UnaTwobit=0;
+	octal_t UnaOctal=0;
+	nibble_t UnaNibble=0;
+	byte_t UnaByte=0;
+	word_t UnaWord=0;
+
 	/* Setup bitblenders to combine multiple sources/outputs to a single output */
 	byte_ptr_list_t seq_output_list={&sig.Seqs.Y[0], &sig.Seqs.Y[1], &sig.Seqs.Y[2]};
 	char *seq_output_order="\x00\x01\x02\x03\xff\xff\xff\xff\x04\x05\x06\x07\xff\xff\xff\xff\x08\x09\x0a\x0b";
@@ -234,7 +263,12 @@ int main(int argc, char *argv[]) {
 	prom76161_init(&com.ROM5,ROM_files[5], &sig.uROM.uA, &sig.uROM.uD[5], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
 	prom76161_init(&com.ROM6,ROM_files[6], &sig.uROM.uA, &sig.uROM.uD[6], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
 
+	/* Initialize uIW6 Decoders */
+	com.uIW6D0 = (dt_74(ls139)) { .BA1= &sig.uIW6D.D210, .G1_= &sig.uIW6D.DeMUXSel, .Y1=&sig.uIW6D.uIW6D0O,
+		.BA2= &UnaNibble, .G2_= &UnaBit, .Y2=&UnaOctal,};
 
+	com.uIW6D1 = (dt_74(ls138)) { .CBA= &sig.uIW6D.D210, G1: &sig.uIW6D.DeMUXSel, Y: &sig.uIW6D.uIW6D1O,
+		.G2A_=&NullBit, .G2B_=&NullBit };
 
 
 	/* Initilize two am2909 and one am2911 sequencers */
@@ -281,6 +315,9 @@ int main(int argc, char *argv[]) {
 		&sig.ALUs.FZ[1], &sig.ALUs.F3[1], &sig.ALUs.Y[1], &sig.ALUs.OE_[1]);
 
 
+
+
+
 	/* Update PROM outputs based on address input and CE1_,CE2,CE3 */
 	prom76161_update(&com.ROM_A);
 	prom76161_update(&com.ROM_B);
@@ -289,6 +326,15 @@ int main(int argc, char *argv[]) {
 	prom76161_update(&com.ROM_E);
 	prom76161_update(&com.ROM_F);
 	prom76161_update(&com.ROM_M);
+	
+	/* Decode output of highest order board byte (lowest order logical) of uROM */
+	logic_74ls139(&com.uIW6D0);
+	logic_74ls138(&com.uIW6D1);
+
+	/* Latch decoded result of of uIW6 */
+	//logic_74ls174(&com.uIW6DL0);
+	//logic_74ls174(&com.uIW6DL1);
+	//logic_74ls174(&com.uIW6DL2);
 
 	/* Update uROM address inputs from collected nibbles of output from sequencers */ 
 	nibbles_to_word(&sig.uROM.uA, &sig.Seqs.Y[0], &sig.Seqs.Y[1], &sig.Seqs.Y[2], &NullByte);
