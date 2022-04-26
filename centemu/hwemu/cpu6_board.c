@@ -4,6 +4,10 @@
 #include "am2901.h"
 #include "am2909.h"
 #include "prom76161.h"
+#include "prom6309.h"
+#include "74ls.h"
+#include "bus-xcvr-misc.h"
+#include "ram-misc.h"
 
 struct cpu6_signals {
 	/* System bus connection */
@@ -68,10 +72,76 @@ struct cpu6_components {
 		struct { prom76161_device_t ROM_E,ROM_D,ROM_A,ROM_F,ROM_C,ROM_B,ROM_M; };
 	};
 
+	/* uI Latches - Direct (ROM0-ROM5) */
+	union {
+		struct { logic_74ls377_device_t UM5,  UL5,  UK5,  UJ5,  UH5,  UF5;  };
+		struct { logic_74ls377_device_t uIL0, uIL1, uIL2, uIL3, uIL4, uIL5; };
+	};
+
+	/* uI High byte decode (ROM6)*/
+	union {
+		struct { logic_74ls138_device_t UD3; logic_74ls139_device_t UD2; };
+		struct { logic_74ls138_device_t uI6D0; logic_74ls139_device_t uI6D1; };
+	};
+
+	/* uI High byte latches  */
+	union {
+		struct { logic_74ls174_device_t UD5, UD4, UE5; };
+		struct { logic_74ls174_device_t uIL6A, uIL6B, uIL6C; };
+	};
+
 	/* Sequencers */
 	union {
 		struct { am2909_device_t ULJ10,UL10; am2911_device_t UL9; };
-		struct { am2909_device_t SEQ0,SEQ1; am2911_device_t SEQ2; };
+		struct { am2909_device_t Seq0,Seq1; am2911_device_t Seq2; };
+	};
+
+	/* 256-byte Register File Address Decode PROM */
+	union {
+		struct { prom6309_device_t UB13; };
+		struct { prom6309_device_t RFADecodeROM; };
+	};
+
+	/* Register File Address Latch */
+	union {
+		struct { logic_74ls377_device_t UC13; };
+		struct { logic_74ls377_device_t RegFileAL; };
+	};
+
+	/* Interrupt Level Counter / Latch w/ Inverter on TC_->CEP_ to enable counting but no wrapping */
+	union {
+		struct { logic_74ls169_device_t UC15; logic_74ls04_device_t UA15C; };
+		struct { logic_74ls169_device_t ILCnt; logic_74ls04_device_t ILCntEN; };
+	};
+
+	/* Register File Interrupt Level MUX */
+	union {
+		struct { logic_74ls157_device_t UC14; };
+		struct { logic_74ls157_device_t RegFileILMUX; };
+	};
+
+	/* 256 Byte (2x256x4) Register File - 16 bytes in 16 interrupt levels */
+	union {
+		struct { ram_93l422_device_t UD14, UD15; };
+		struct { ram_93l422_device_t RegFile0, RegFile1; };
+	};
+
+	/* Register File Output Latch */
+	union {
+		struct { logic_74ls374_device_t UD13; };
+		struct { logic_74ls374_device_t RegFileOL; };
+	};
+
+	/* ALU Link (carry) Control MUX */
+	union {
+		struct {logic_74ls153_device_t UF6; };
+		struct {logic_74ls153_device_t ALULMUX; };
+	};
+
+	/* ALU Shift Control MUX */
+	union {
+		struct {logic_74ls253_device_t UH6; };
+		struct {logic_74ls253_device_t ALUSMUX; };
 	};
 
 	/* ALUs */
@@ -79,16 +149,58 @@ struct cpu6_components {
 		struct { am2901_device_t UF10,UF11; };
 		struct { am2901_device_t ALU0,ALU1; };
 	};
+
+	/* ALU Status Register */
+	union {
+		struct {logic_74ls378_device_t UJ9; };
+		struct {logic_74ls378_device_t ALUSR; };
+	};
+
+	/* Address Latch Stage Sync */
+	union {
+		struct { logic_74ls157_device_t UD6; };
+		struct { logic_74ls157_device_t ALSync; };
+	};
+
+	/* Address Latch Source MUXes */
+	union {
+		struct { logic_74ls157_device_t UB3,  UC3,  UB4,  UC4; };
+		struct { logic_74ls157_device_t ALM0, ALM1, ALM2, ALM3; };
+	};
+
+	/* Address Counters/Latches A - Staging */
+	union {
+		struct { logic_74ls169_device_t UB2,  UC2,  UB5,  UC5; };
+		struct { logic_74ls169_device_t AL0a, AL1a, AL2a, AL3a; };
+	};
+	
+	/* Address Counters/Latches B - Output */
+	union {
+		struct { logic_74ls169_device_t UB1,  UC1,  UB6,  UC6; };
+		struct { logic_74ls169_device_t AL0b, AL1b, AL2b, AL3b; };
+	};
+
+	/* Address Bus Tranceivers */
+	union {
+		struct { logic_ds8835_device_t UA4, UA5, UA6, UA8, UA9; };
+		struct { logic_ds8835_device_t ABUSxcvr0, ABUSxcvr1, ABUSxcvr2, ABUSxcvr3, ABUSxcvr4; };
+	};
+
+	/* Data Bus Tranceivers */
+	union {
+		struct { logic_am2907_device_t UA11, UA12; };
+		struct { logic_am2907_device_t DBUSxcvr0, DBUSxcvr1; };
+	};
 };
 
 static char *ROM_files[] = {
-	"ROMS/CPU_5.rom", /* MWK3.11 - A3.11 */
+	"ROMS/CPU_1.rom"  /* MWE3.11 - ??3.11 */
 	"ROMS/CPU_2.rom", /* MWF3.11 - B3.11 */
 	"ROMS/CPU_3.rom", /* MWH3.11 - C3.11 */
+	"ROMS/CPU_4.rom", /* MWJ3.11 - F3.11 */
+	"ROMS/CPU_5.rom", /* MWK3.11 - A3.11 */
 	"ROMS/CPU_6.rom", /* MWL3.11 - D3.11 */
 	"ROMS/CPU_7.rom", /* MWM3.11 - E3.11 */
-	"ROMS/CPU_4.rom", /* MWJ3.11 - F3.11 */
-	"ROMS/CPU_1.rom"  /* MWE3.11 - ??3.11 */
 };
 
 #define C_(comp) (com.comp)
@@ -114,17 +226,19 @@ int main(int argc, char *argv[]) {
 
 
 	/* Load and initilize 76161 PROMS */
-	prom76161_init(&com.ROM_A,ROM_files[0], &sig.uROM.uA, &sig.uROM.uD[0], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
-	prom76161_init(&com.ROM_B,ROM_files[1], &sig.uROM.uA, &sig.uROM.uD[1], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
-	prom76161_init(&com.ROM_C,ROM_files[2], &sig.uROM.uA, &sig.uROM.uD[2], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
-	prom76161_init(&com.ROM_D,ROM_files[3], &sig.uROM.uA, &sig.uROM.uD[3], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
-	prom76161_init(&com.ROM_E,ROM_files[4], &sig.uROM.uA, &sig.uROM.uD[4], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
-	prom76161_init(&com.ROM_F,ROM_files[5], &sig.uROM.uA, &sig.uROM.uD[5], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
-	prom76161_init(&com.ROM_M,ROM_files[6], &sig.uROM.uA, &sig.uROM.uD[6], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
+	prom76161_init(&com.ROM0,ROM_files[0], &sig.uROM.uA, &sig.uROM.uD[0], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
+	prom76161_init(&com.ROM1,ROM_files[1], &sig.uROM.uA, &sig.uROM.uD[1], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
+	prom76161_init(&com.ROM2,ROM_files[2], &sig.uROM.uA, &sig.uROM.uD[2], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
+	prom76161_init(&com.ROM3,ROM_files[3], &sig.uROM.uA, &sig.uROM.uD[3], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
+	prom76161_init(&com.ROM4,ROM_files[4], &sig.uROM.uA, &sig.uROM.uD[4], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
+	prom76161_init(&com.ROM5,ROM_files[5], &sig.uROM.uA, &sig.uROM.uD[5], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
+	prom76161_init(&com.ROM6,ROM_files[6], &sig.uROM.uA, &sig.uROM.uD[6], &sig.uROM.CE1_, &sig.uROM.CE2, &sig.uROM.CE3);
+
+
 
 
 	/* Initilize two am2909 and one am2911 sequencers */
-	am2909_init(&com.SEQ0,"Seq0",&cl_uIR->clk,
+	am2909_init(&com.Seq0,"Seq0",&cl_uIR->clk,
 		&sig.Seqs.S[0],
 		&sig.Seqs.FE_[0], &sig.Seqs.PUP[0],
 		&sig.Seqs.Di[0],&sig.Seqs.Ri[0],&sig.Seqs.RE_[0],
@@ -132,7 +246,7 @@ int main(int argc, char *argv[]) {
 		&sig.Seqs.ORi[0],&sig.Seqs.ZERO_[0],&sig.Seqs.OE_[0],&sig.Seqs.Y[0]
 	);
 
-	am2909_init(&com.SEQ1,"Seq1",&cl_uIR->clk,
+	am2909_init(&com.Seq1,"Seq1",&cl_uIR->clk,
 		&sig.Seqs.S[1],
 		&sig.Seqs.FE_[1], &sig.Seqs.PUP[1],
 		&sig.Seqs.Di[1],&sig.Seqs.Ri[1],&sig.Seqs.RE_[1],
@@ -140,7 +254,7 @@ int main(int argc, char *argv[]) {
 		&sig.Seqs.ORi[1],&sig.Seqs.ZERO_[1],&sig.Seqs.OE_[1],&sig.Seqs.Y[1]
 	);
 
-	am2911_init(&com.SEQ2,"Seq2",&cl_uIR->clk,
+	am2911_init(&com.Seq2,"Seq2",&cl_uIR->clk,
 		&sig.Seqs.S[2],
 		&sig.Seqs.FE_[2], &sig.Seqs.PUP[2],
 		&sig.Seqs.Di[2],&sig.Seqs.RE_[2],
