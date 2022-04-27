@@ -9,23 +9,47 @@
 #define BITRANGE_R(d,s,n) (bitreverse_64(BITRANGE(d,s,n)) >>(64-n))
 
 
-void nibbles_to_byte(uint8_t *dest, nibble_t *n0, nibble_t *n1) {
+void nibbles_to_byte( byte_t *dest,
+	nibble_t *n0, nibble_t *n1)
+{
 	*dest=( (*n0)|(*n1<<4) );
 }
-void nibbles_to_word(uint16_t *dest,
+
+void nibbles_to_word( word_t *dest,
 	nibble_t *n0, nibble_t *n1, nibble_t *n2, nibble_t *n3)
 {
 	*dest=( (*n0)|(*n1<<4)|(*n2<<8)|(*n3<<12) );
 }
 
-void nibbles_to_longword( uint32_t *dest,
+void bytes_to_word( word_t *dest,
+	byte_t *b0, nibble_t *b1 )
+{
+	*dest=( (*b0)|(*b1<<8) );
+}
+
+
+
+void nibbles_to_longword( longword_t *dest,
 	nibble_t *n0, nibble_t *n1, nibble_t *n2, nibble_t *n3,
 	nibble_t *n4, nibble_t *n5, nibble_t *n6, nibble_t *n7 )
 {
 	*dest=( (*n0)|(*n1<<4)|(*n2<<8)|(*n3<<12)|(*n4<<16)|(*n5<<20)|(*n6<<24)|(*n7<<28) );
 }
 
-void nibbles_to_mouthful( uint64_t *dest,
+void bytes_to_longword( longword_t *dest,
+	byte_t *b0, byte_t *b1, byte_t *b2, byte_t *b3)
+{
+	*dest=( (*b0)|(*b1<<8)|(*b2<<16)|(*b3<<24) );
+}
+
+void words_to_longword( longword_t *dest,
+	word_t *w0, word_t *w1 )
+{
+	*dest=( (*w0)|(*w1<<16) );
+}
+
+
+void nibbles_to_mouthful( mouthful_t *dest,
 	nibble_t *n0, nibble_t *n1, nibble_t *n2, nibble_t *n3,
 	nibble_t *n4, nibble_t *n5, nibble_t *n6, nibble_t *n7, 
 	nibble_t *n8, nibble_t *n9, nibble_t *na, nibble_t *nb,
@@ -36,6 +60,28 @@ void nibbles_to_mouthful( uint64_t *dest,
 		((uint64_t)*nc<<48)|((uint64_t)*nd<<52)|((uint64_t)*ne<<56)|((uint64_t)*nf<<60) );
 }
 
+void bytes_to_mouthful( mouthful_t *dest,
+	byte_t *b0, byte_t *b1, byte_t *b2, byte_t *b3,
+	byte_t *b4, byte_t *b5, byte_t *b6, byte_t *b7 )
+{
+	*dest=( (*b0)|(*b1<<8)|(*b2<<16)|(*b3<<24)|
+		((uint64_t)*b4<<32)|((uint64_t)*b5<<40)|
+		((uint64_t)*b6<<48)|((uint64_t)*b7<<56)
+	);
+}
+
+void words_to_mouthful( mouthful_t *dest,
+	word_t *w0, word_t *w1, word_t *w2, word_t *w3)
+{
+	*dest=( (*w0) | (*w1<<16) | ((uint64_t)*w2<<32) | ((uint64_t)*w3<<48) );
+}
+
+void longwords_to_mouthful( mouthful_t *dest,
+	longword_t *lw0, longword_t *lw1 )
+{
+	*dest=( (*lw0) | ((uint64_t)*lw1<<32) );
+}
+
 
 /* Concatenate an array of bytes into an unsigned 64-bit int */
 uint64_t concat_bytes_64(uint8_t num, uint8_t bytes[]){
@@ -44,6 +90,31 @@ uint64_t concat_bytes_64(uint8_t num, uint8_t bytes[]){
 		out = out | ( ( (uint64_t)bytes[i] )<<(i*8));
 	}
 	return(out);
+}
+
+
+void word_to_bytes( word_t *src, byte_t *b0, byte_t *b1 ) {
+	*b0=(*src)&0x00ff;
+	*b1=((*src)&0xff00)>>8;
+}
+void longword_to_bytes ( longword_t *src, byte_t *b0, byte_t *b1, byte_t *b2, byte_t *b3 ) {
+	*b0=((*src)&0x000000ff);
+	*b1=((*src)&0x0000ff00)>>8;
+	*b2=((*src)&0x00ff0000)>>16;
+	*b3=((*src)&0xff000000)>>24;
+}
+void mouthful_to_bytes ( longword_t *src,
+		byte_t *b0, byte_t *b1, byte_t *b2, byte_t *b3,
+		byte_t *b4, byte_t *b5, byte_t *b6, byte_t *b7 )
+{
+	*b0=((*src)&0x00000000000000ffLL);
+	*b1=((*src)&0x000000000000ff00LL)>>8;
+	*b2=((*src)&0x0000000000ff0000LL)>>16;
+	*b3=((*src)&0x00000000ff000000LL)>>24;
+	*b4=((*src)&0x000000ff00000000LL)>>32;
+	*b5=((*src)&0x0000ff0000000000LL)>>40;
+	*b6=((*src)&0x00ff000000000000LL)>>58;
+	*b7=((*src)&0xff00000000000000LL)>>56;
 }
 
 #define _bitreverse_(size) \

@@ -43,6 +43,12 @@ struct cpu6_signals {
 		bitsalad_bag_t uD6inSalad[3];
 		sixbit_t uD6[3];
 		sixbit_t uQ6[3];
+		/* Bitblender to recombine decoded uIW6 into a word and from there split back to bytes */
+		bitblender_t uIWQ6_toword_blender;
+		word_t uQ6_cword;
+		byte_t uQ6_cbyte[2];
+		/* A mouthful of bytes containing the full decoded instruction word */
+		mouthful_t uIWR_cmouthful;
 	} uIWR;
 
 	/* 12 bit Sequencer made with 2 AM2909 and 1 AM2911 4-bitslice sequencers */
@@ -314,6 +320,21 @@ int main(int argc, char *argv[]) {
 	com.uIW6DL1= (dt_74(ls174)) { .clk= &cl_uIR->clk, .CLR_= &sig.bus.RESET_, .D= &sig.uIWR.uD6[1], .Q=&sig.uIWR.uQ6[1] };
 	com.uIW6DL2= (dt_74(ls174)) { .clk= &cl_uIR->clk, .CLR_= &sig.bus.RESET_, .D= &sig.uIWR.uD6[2], .Q=&sig.uIWR.uQ6[2] };
 
+	/* Create a combined output from the uIWD latches */
+	/* Mapping from output of UE3 to input of UD4/UD5 */
+	/* 0_00->D4.4, 0_01->D4.0, 0_10->D4.2, 0_11->D4.3 */
+	/* 1000->D5.0, 1001->D5.1, 1010->D5.5, 1011->D5.4 */
+	/* 1100->D5.2, 1101->D5.3                         */
+	/* D4->E5.3, D5->E5.0, D6->E5.4, D7->E5.5 */
+	
+	/* Setup bitblenders to combine multiple sources/outputs to a single output */
+	sig.uIWR.uIWQ6_toword_blender= (bitblender_t) {
+		.w=&sig.uIWR.uQ6_cword, .bits=16,
+		.order= "\x00\x01\x02\x03\x04\x05\xff\xff" "\x06\x07\x08\x09\x0a\xb\xff\xff" "\x0c\xff\xff\x0d\x0e\x0f\xff\xff",
+		.sources= &(byte_ptr_list_t) {&sig.uIWR.uD6[0],&sig.uIWR.uD6[1],&sig.uIWR.uD6[2]}
+	};
+
+
 	/* Initialize two am2909 and one am2911 sequencers */
 	am2909_init(&com.Seq0,"Seq0",&cl_uIR->clk,
 		&sig.Seqs.S[0],
@@ -383,6 +404,16 @@ int main(int argc, char *argv[]) {
 	logic_74ls174(&com.uIW6DL0);
 	logic_74ls174(&com.uIW6DL1);
 	logic_74ls174(&com.uIW6DL2);
+
+	/* Split our cword from combined output of uIW6D latches into two bytes */
+	word_to_bytes(&sig.uIWR.uQ6_cword, &sig.uIWR.uQ6_cbyte[0], &sig.uIWR.uQ6_cbyte[1]);
+
+	/* Combine all of our instruction register output latch values into one mouthful */
+	bytes_to_mouthful( &sig.uIWR.uIWR_cmouthful,
+		&sig.uIWR.uQ[0], &sig.uIWR.uQ[1], &sig.uIWR.uQ[2], &sig.uIWR.uQ[3],
+		&sig.uIWR.uQ[4], &sig.uIWR.uQ[5], &sig.uIWR.uQ6_cbyte[0], &sig.uIWR.uQ6_cbyte[1]);
+
+	printf("Mouthful is:%#0"PRIx64"\n",sig.uIWR.uIWR_cmouthful);
 
 	/* Update uROM address inputs from collected nibbles of output from sequencers */ 
 	nibbles_to_word(&sig.uROM.uA, &sig.Seqs.Y[0], &sig.Seqs.Y[1], &sig.Seqs.Y[2], &NullByte);

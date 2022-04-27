@@ -6,26 +6,50 @@
 #define BITRANGE(d,s,n) ((d>>s) & ((2LL<<(n-1))-1) )
 #define BITRANGE_R(d,s,n) (bitreverse_64(BITRANGE(d,s,n)) >>(64-n))
 
-/* Pack nibbles together to make bytes, words, longwords, and even mouthfuls! */
-void nibbles_to_byte(uint8_t *dest, nibble_t *n0, nibble_t *n1);
 
-void nibbles_to_word(uint16_t *dest,
+/* Pack nibbles, bytes, words, and longwords together */
+/* to make bytes, words, longwords, and even mouthfuls! */
+
+void nibbles_to_byte( byte_t *dest,
+	nibble_t *n0, nibble_t *n1);
+
+void nibbles_to_word( word_t *dest,
 	nibble_t *n0, nibble_t *n1, nibble_t *n2, nibble_t *n3);
+void bytes_to_word( word_t *dest,
+	byte_t *b0, nibble_t *b1 );
 
-void nibbles_to_longword( uint32_t *dest,
+
+void nibbles_to_longword( longword_t *dest,
 	nibble_t *n0, nibble_t *n1, nibble_t *n2, nibble_t *n3,
 	nibble_t *n4, nibble_t *n5, nibble_t *n6, nibble_t *n7 );
+void bytes_to_longword( longword_t *dest,
+	byte_t *b0, byte_t *b1, byte_t *b2, byte_t *b3);
+void words_to_longword( longword_t *dest,
+	word_t *w0, word_t *w1 );
 
-void nibbles_to_mouthful( uint64_t *dest,
+void nibbles_to_mouthful( mouthful_t *dest,
 	nibble_t *n0, nibble_t *n1, nibble_t *n2, nibble_t *n3,
 	nibble_t *n4, nibble_t *n5, nibble_t *n6, nibble_t *n7, 
 	nibble_t *n8, nibble_t *n9, nibble_t *na, nibble_t *nb,
-	nibble_t *nc, nibble_t *nd, nibble_t *ne, nibble_t *nf );
+	nibble_t *nc, nibble_t *nd, nibble_t *ne, nibble_t *nf ); 
+void bytes_to_mouthful( mouthful_t *dest,
+	byte_t *b0, byte_t *b1, byte_t *b2, byte_t *b3,
+	byte_t *b4, byte_t *b5, byte_t *b6, byte_t *b7 );
+void words_to_mouthful( mouthful_t *dest,
+	word_t *w0, word_t *w1, word_t *w2, word_t *w3);
+void longwords_to_mouthful( mouthful_t *dest,
+	longword_t *lw0, longword_t *lw1 );
 
 
 /* Concatenate an array of bytes into an unsigned 64-bit int */
 uint64_t concat_bytes_64(uint8_t num, uint8_t bytes[]);
 
+/* Split words, longwords, and mouthfuls into bytes */
+void word_to_bytes( word_t *src, byte_t *b0, byte_t *b1 );
+void longword_to_bytes ( longword_t *src, byte_t *b0, byte_t *b1, byte_t *b2, byte_t *b3 );
+void mouthful_to_bytes ( longword_t *src,
+		byte_t *b0, byte_t *b1, byte_t *b2, byte_t *b3,
+		byte_t *b4, byte_t *b5, byte_t *b6, byte_t *b7 );
 
 
 /* Reverse bits */
