@@ -19,6 +19,8 @@ typedef uint16_t word_t;
 typedef uint16_t twelvebit_t;
 typedef uint16_t tenbit_t;
 typedef uint8_t byte_t;
+typedef uint8_t sevenbit_t;
+typedef uint8_t sixbit_t;
 typedef uint8_t fivebit_t;
 typedef uint8_t nibble_t;
 typedef uint8_t octal_t;

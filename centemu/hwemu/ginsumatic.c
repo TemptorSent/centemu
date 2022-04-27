@@ -36,15 +36,6 @@ void nibbles_to_mouthful( uint64_t *dest,
 		((uint64_t)*nc<<48)|((uint64_t)*nd<<52)|((uint64_t)*ne<<56)|((uint64_t)*nf<<60) );
 }
 
-/* 0x12345678 0x56781234 */
-void bitsalad_tosser_8(uint8_t *a, uint8_t *b, uint32_t salad) {
-	*b=bitsalad_8(salad,*a);
-}
-
-void bitsalad_tosser_16(uint16_t *a, uint16_t *b, uint64_t salad) {
-	*b=bitsalad_16(salad,*a);
-}
-
 
 /* Concatenate an array of bytes into an unsigned 64-bit int */
 uint64_t concat_bytes_64(uint8_t num, uint8_t bytes[]){
@@ -70,35 +61,108 @@ _bitreverse_(32);
 _bitreverse_(16);
 _bitreverse_(8);
 #undef _bitreverse_
-uint64_t xbitreverse_64(uint64_t in) {
-	uint64_t out=0;
-	for(int i=63;i>=0;i--) {
-		out |= in&0x1;
-		if(!i){return(out);}
-		out <<= 1;
-		in >>= 1;
-	}
-	return(out);
-}
 
-uint16_t bitsalad_16(uint64_t order, uint16_t d) {
-	uint8_t pos;
-	uint16_t out;
-	for(int i=0; i<16; i++) {
-		pos=BITRANGE(order,i*4,4);
-		if(d&1<<i){out |= 1<<pos;}
-	}
-	return(out);
-}
 
-uint8_t bitsalad_8(uint32_t order, uint8_t d) {
+
+/* Bitsalad */
+/* 0x76543210 */
+uint8_t bitsalad_n_byte(uint8_t serving, uint32_t order, uint8_t d) {
 	uint8_t pos;
 	uint8_t out;
-	for(int i=0; i<8; i++) {
+	for(int i=0; i<serving; i++) {
 		pos=BITRANGE(order,i*4,4);
-		if(d&1<<i){out |= 1<<pos;}
+		if(serving>pos) {
+			if(d&1<<i){out |= 1<<pos;}
+		} else {
+			serving++;
+		}
 	}
 	return(out);
+}
+
+/* 0xf3c2d510 */
+uint8_t bitsalad_byte_n_word(uint8_t serving, uint32_t order, uint16_t d) {
+	return( bitsalad_n_word( serving, 0x00000000ffffffffLL&order, d ) & 0xff );
+}
+
+/* 0xfedcba9876543210LL */
+uint16_t bitsalad_n_word(uint8_t serving, uint64_t order, uint16_t d) {
+	uint8_t pos;
+	uint16_t out;
+	for(int i=0; i<serving; i++) {
+		pos=BITRANGE(order,i*4,4);
+		if(serving>pos) {
+			if(d&1<<i){out |= 1<<pos;}
+		} else {
+			serving++;
+		}
+	}
+	return(out);
+}
+
+
+/* Salad tossers - serve up n bits in byte or word flavor from a bowl of 8 or 16 bits */
+/* *a points to source *b points to destination */
+void bitsalad_tosser_n_byte(uint8_t serving, uint8_t *a, uint8_t *b, uint32_t salad) {
+	*b=bitsalad_n_byte(serving, salad,*a);
+}
+
+void bitsalad_tosser_byte_n_word(uint8_t serving, uint16_t *a, uint8_t *b, uint32_t salad) {
+	*b=bitsalad_n_word( serving, 0x00000000ffffffffLL&salad, *a ) & 0xff;
+}
+
+void bitsalad_tosser_n_word(uint8_t serving, uint16_t *a, uint16_t *b, uint64_t salad) {
+	*b=bitsalad_n_word(serving, salad, *a);
+}
+
+/* Fixed size versions of above, 8->8, 16->8 or 16->16 bits */
+uint8_t bitsalad_byte(uint32_t order, uint8_t d) {
+	return( bitsalad_n_byte(8, order, d) );
+}
+uint8_t bitsalad_byte_word(uint32_t order, uint16_t d) {
+	return( bitsalad_byte_n_word(8, order, d) );
+}
+uint16_t bitsalad_word(uint64_t order, uint16_t d) {
+	return( bitsalad_n_word(16, order, d) );
+}
+
+
+void bitsalad_tosser_byte(uint8_t *a, uint8_t *b, uint32_t salad) {
+	*b=bitsalad_byte(salad,*a);
+}
+void bitsalad_tosser_byte_word(uint16_t *a, uint8_t *b, uint32_t salad) {
+	*b=bitsalad_byte_word(salad, *a);
+}
+void bitsalad_tosser_word(uint16_t *a, uint16_t *b, uint64_t salad) {
+	*b=bitsalad_word(salad,*a);
+}
+
+
+/* Prepare a serving of n bits from word or byte size bowl into same size or smaller bowl! */
+
+void bitsalad_prep_small(bitsalad_bag_t *bag, uint8_t serving, uint8_t *a, uint8_t *b, uint32_t salad) {
+	bag->size=BITSALAD_BAG_SMALL; bag->serving=serving; bag->in.byte=a; bag->out.byte=b; bag->salad.small=salad;
+}
+void bitsalad_prep_medium(bitsalad_bag_t *bag, uint8_t serving, uint16_t *a, uint8_t *b, uint32_t salad) {
+	bag->size=BITSALAD_BAG_MEDIUM; bag->serving=serving; bag->in.word=a; bag->out.byte=b; bag->salad.small=salad;
+}
+void bitsalad_prep_large(bitsalad_bag_t *bag, uint8_t serving, uint16_t *a, uint16_t *b, uint64_t salad) {
+	bag->size=BITSALAD_BAG_LARGE; bag->serving=serving; bag->in.word=a; bag->out.word=b; bag->salad.large=salad;
+}
+
+/* Powertools for salad! */
+void bitsalad_shooter(bitsalad_bag_t *bag) {
+	switch(bag->size) {
+		case BITSALAD_BAG_SMALL:
+			bitsalad_tosser_n_byte(bag->serving, bag->in.byte, bag->out.byte, bag->salad.small);
+			break;
+		case BITSALAD_BAG_MEDIUM:
+			bitsalad_tosser_byte_n_word(bag->serving, bag->in.word, bag->out.byte, bag->salad.small);
+			break;
+		case BITSALAD_BAG_LARGE:
+			bitsalad_tosser_n_word(bag->serving, bag->in.word, bag->out.word, bag->salad.large);
+			break;
+	}
 }
 
 #define _bitblend_(size) \

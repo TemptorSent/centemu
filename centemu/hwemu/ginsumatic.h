@@ -22,13 +22,6 @@ void nibbles_to_mouthful( uint64_t *dest,
 	nibble_t *n8, nibble_t *n9, nibble_t *na, nibble_t *nb,
 	nibble_t *nc, nibble_t *nd, nibble_t *ne, nibble_t *nf );
 
-/* Tosses 8 bits between *in and *out using a 32-bit salad */
-void bitsalad_tosser_8(uint8_t *in, uint8_t *out, uint32_t salad);
-
-/* Tosses 16 bits between *in and *out using a 64-bit salad */
-/* Note that 64-bit constants need LL specifer! */
-void bitsalad_tosser_16(uint16_t *in, uint16_t *out, uint64_t salad);
-
 
 /* Concatenate an array of bytes into an unsigned 64-bit int */
 uint64_t concat_bytes_64(uint8_t num, uint8_t bytes[]);
@@ -42,8 +35,51 @@ uint16_t bitreverse_16(uint16_t in);
 uint8_t bitreverse_8(uint8_t in);
 
 /* Rearrange bits */
-uint16_t bitsalad_16(uint64_t order, uint16_t d);
 uint8_t bitsalad_8(uint32_t order, uint8_t d);
+uint16_t bitsalad_16(uint64_t order, uint16_t d);
+
+/* Tosses 8 bits between *in and *out using a 32-bit salad */
+void bitsalad_tosser_8(uint8_t *in, uint8_t *out, uint32_t salad);
+
+/* Tosses 16 bits between *in and *out using a 64-bit salad */
+/* Note that 64-bit constants need LL specifer! */
+void bitsalad_tosser_16(uint16_t *in, uint16_t *out, uint64_t salad);
+
+uint8_t bitsalad_n_byte(uint8_t serving, uint32_t order, uint8_t d);
+uint8_t bitsalad_byte_n_word(uint8_t serving, uint32_t order, uint16_t d);
+uint16_t bitsalad_n_word(uint8_t serving, uint64_t order, uint16_t d);
+
+void bitsalad_tosser_n_byte(uint8_t serving, uint8_t *a, uint8_t *b, uint32_t salad);
+void bitsalad_tosser_byte_n_word(uint8_t serving, uint16_t *a, uint8_t *b, uint32_t salad);
+void bitsalad_tosser_n_word(uint8_t serving, uint16_t *a, uint16_t *b, uint64_t salad);
+
+uint8_t bitsalad_byte(uint32_t order, uint8_t d);
+uint8_t bitsalad_byte_word(uint32_t order, uint16_t d);
+uint16_t bitsalad_word(uint64_t order, uint16_t d);
+
+void bitsalad_tosser_byte(uint8_t *a, uint8_t *b, uint32_t salad);
+void bitsalad_tosser_word(uint16_t *a, uint16_t *b, uint64_t salad);
+void bitsalad_tosser_byte_word(uint16_t *a, uint8_t *b, uint32_t salad);
+
+
+
+/* Rearrange serving bits using predefined input pointer, output pointer and salad */
+
+enum bitsalad_bag_sizes { BITSALAD_BAG_SMALL, BITSALAD_BAG_MEDIUM, BITSALAD_BAG_LARGE };
+typedef struct bitsalad_bag_t {
+	enum bitsalad_bag_sizes size;
+	uint8_t serving;
+	union { uint8_t *byte; uint16_t *word; } in;
+	union { uint8_t *byte; uint16_t *word; } out;
+	union { uint32_t small; uint64_t large; } salad;
+} bitsalad_bag_t;
+
+/* Prepare a serving of n bits from word or byte size bowl into same size or smaller bowl! */
+void bitsalad_prep_small(bitsalad_bag_t *bag, uint8_t serving, uint8_t *a, uint8_t *b, uint32_t salad);
+void bitsalad_prep_medium(bitsalad_bag_t *bag, uint8_t serving, uint16_t *a, uint8_t *b, uint32_t salad);
+void bitsalad_prep_large(bitsalad_bag_t *bag, uint8_t serving, uint16_t *a, uint16_t *b, uint64_t salad);
+
+void bitsalad_shooter(bitsalad_bag_t *bag);
 
 /* Blend bits from multiple sources */ 
 uint16_t bitblender_16(uint8_t bits, char *order, uint8_t *sources[] );
