@@ -1,10 +1,36 @@
 /* Does your header make julienne fries? */
 #pragma once
+#include <stdint.h>
 #include <inttypes.h>
+#include "logic-common.h"
+
+#define deroach(...) printf(__VA_ARGS__);
+//#define deroach(...) ; //printf(__VA_ARGS__);
 
 /* Utility functions to extract ranges of bits, with _R reversing the bit order returned */
-#define BITRANGE(d,s,n) ((d>>s) & ((2LL<<(n-1))-1) )
+#define BITRANGE(d,s,n) ((d>>s) & ((1LL<<(n))-1LL) )
 #define BITRANGE_R(d,s,n) (bitreverse_64(BITRANGE(d,s,n)) >>(64-n))
+
+/* Extract a bit from a larger type */
+void bit_of_a_twobit( bit_t *dest, twobit_t *src, bit_t bit);
+void bit_of_an_octal( bit_t *dest, octal_t *src, twobit_t bit);
+void bit_of_a_nibble( bit_t *dest, nibble_t *src, twobit_t bit);
+void bit_of_a_fivebit( bit_t *dest, fivebit_t *src, octal_t bit);
+void bit_of_a_sixbit( bit_t *dest, sixbit_t *src, octal_t bit);
+void bit_of_a_byte( bit_t *dest, byte_t *src, octal_t bit);
+void bit_of_a_word( bit_t *dest, word_t *src, nibble_t bit);
+void bit_of_a_longword( bit_t *dest, longword_t *src, byte_t bit);
+void bit_of_a_mouthful( bit_t *dest, mouthful_t *src, byte_t bit);
+
+/* Assemble bits into larger types */
+void bits_to_twobit( twobit_t *dest, bit_t *b0, bit_t *b1);
+void bits_to_octal( octal_t *dest, bit_t *b0, bit_t *b1, bit_t *b2 );
+void bits_to_nibble( nibble_t *dest, bit_t *b0, bit_t *b1, bit_t *b2, bit_t *b3 );
+void bits_to_fivebit( fivebit_t *dest, bit_t *b0, bit_t *b1, bit_t *b2, bit_t *b3, bit_t *b4 );
+void bits_to_sixbit( sixbit_t *dest, bit_t *b0, bit_t *b1, bit_t *b2, bit_t *b3, bit_t *b4 , bit_t *b5);
+void bits_to_sevenbit( sevenbit_t *dest, bit_t *b0, bit_t *b1, bit_t *b2, bit_t *b3, bit_t *b4 , bit_t *b5, bit_t *b6);
+void bits_to_byte( byte_t *dest, bit_t *b0, bit_t *b1, bit_t *b2, bit_t *b3, bit_t *b4 , bit_t *b5, bit_t *b6, bit_t *b7);
+/* ...if you need more than a byte, assemble to nibbles or bytes first, then blend? */
 
 
 /* Pack nibbles, bytes, words, and longwords together */
@@ -15,6 +41,7 @@ void nibbles_to_byte( byte_t *dest,
 
 void nibbles_to_word( word_t *dest,
 	nibble_t *n0, nibble_t *n1, nibble_t *n2, nibble_t *n3);
+
 void bytes_to_word( word_t *dest,
 	byte_t *b0, nibble_t *b1 );
 
@@ -47,7 +74,7 @@ uint64_t concat_bytes_64(uint8_t num, uint8_t bytes[]);
 /* Split words, longwords, and mouthfuls into bytes */
 void word_to_bytes( word_t *src, byte_t *b0, byte_t *b1 );
 void longword_to_bytes ( longword_t *src, byte_t *b0, byte_t *b1, byte_t *b2, byte_t *b3 );
-void mouthful_to_bytes ( longword_t *src,
+void mouthful_to_bytes ( mouthful_t *src,
 		byte_t *b0, byte_t *b1, byte_t *b2, byte_t *b3,
 		byte_t *b4, byte_t *b5, byte_t *b6, byte_t *b7 );
 
@@ -127,3 +154,4 @@ void bitblend(bitblender_t *blend);
 char  *int64_bits_to_binary_string_fields(char *out, uint64_t in, uint8_t bits, char *fieldwidths);
 char  *int64_bits_to_binary_string_grouped(char *out, uint64_t in, uint8_t bits, uint8_t grouping);
 
+char  *byte_bits_to_binary_string_grouped(char *out, uint8_t in, uint8_t bits, uint8_t grouping);

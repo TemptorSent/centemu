@@ -124,3 +124,5 @@ int am2901_init(am2901_device_t *dev, char* id,
 	nibble_t *Y, /* Output value */
 	bit_t *OE_ /* Output Enable (Active LOW) HiZ=1 */
 );
+
+char *am2901_update(am2901_device_t *dev);

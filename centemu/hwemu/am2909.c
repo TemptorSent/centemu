@@ -1,27 +1,31 @@
 #include <stdio.h>
 #include "am2909.h"
+#include "ginsumatic.h"
 
 
 char *am2909_clock_edge_LH(am2909_device_t *dev) {
 	uint8_t O,SP;
 
 	/* Latch Ri into AR if RE_ is LOW */
-	if( !S_(RE_) ){ I_(AR)=oS_(Ri,S_(Di)); }
+	if( !S_(RE_) ){ I_(AR)=oS_(Ri,S_(Di)); deroach("Seq Latching AR=%0x\n",I_(AR)); }
 
 	/* Select source to temp output O */
 	switch(S_(S)) {
-		case uPC: O=I_(uPC); break;
-		case AR: O=I_(AR); break;
-		case STK0: O=dev->STK[I_(SP)]; break;
-		case Di: O=S_(Di); break;
+		case uPC: O=I_(uPC); deroach("Seq S:uPC=%0x\n",O); break;
+		case AR: O=I_(AR); deroach("Seq S:AR=%0x\n",O); break;
+		case STK0: O=dev->STK[I_(SP)]; deroach("Seq S:STK[%0x]=%0x\n",I_(SP),O); break;
+		case Di: O=S_(Di); deroach("Seq S:Di=%0x\n",O); break;
 	}
 
 	/* Apply ZERO_ and ORi to O */
 	O=(S_(ZERO_)?O|oS_(ORi,0):0);
+	deroach("Seq O=%x%s",O, S_(ZERO_)?"":" (ZERO_)");
+	if(oS_(ORi,0)){ deroach(" ORi=%0x",oS_(ORi,0)); }
 
 	/* Increment our uPC based on Cn and set Co if needed */
 	I_(uPC)=(O+S_(Cn))&0xf;
 	S_(Co)=(S_(Cn)&&O==0xf)?1:0;
+	deroach("  uPC=%0x (Cin=%0x,Cout=%0x)",I_(uPC),S_(Cn),S_(Co));
 
 
 	/* Push/Pop as indicated by FE_ and PUP */
@@ -30,13 +34,16 @@ char *am2909_clock_edge_LH(am2909_device_t *dev) {
 		if(S_(PUP)) {
 			I_(SP)=(SP+1)&0x3;
 			dev->STK[I_(SP)]=uPC;
+			deroach("SP++");
 		} else {
 			I_(SP)=SP?SP-1:0x3;
+			deroach("SP--");
 		}
-	}
+	} else { deroach("HOLD SP"); }
 
 	/* Set output values Y if OE_ is LOW (HiZ=1) */
 	TRI_OUTPUT(S_(Y),!S_(OE_),O);
+	deroach(" Y=%s\n",!S_(OE_)?"O":"HiZ");
 	return(0);
 }
 

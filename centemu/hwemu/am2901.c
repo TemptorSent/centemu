@@ -157,7 +157,7 @@ char *am2901_function_decode(am2901_device_t *dev) {
 
 char *am2901_clock_state_setup_H(am2901_device_t *dev){
 	/* Decode destination portion of instruction */
-	printf("Dest: %s\n",am2901_destination_decode(dev));
+	printf("ALU Dest: %s\n",am2901_destination_decode(dev));
 	return(0);
 }
 
@@ -176,10 +176,10 @@ char *am2901_clock_state_hold_L(am2901_device_t *dev){
 
 char *am2901_clock_state_setup_L(am2901_device_t *dev){
 	/* Decode source operands portion of instruction */
-	printf("%s ",am2901_source_operand_decode(dev));
+	printf("ALU Src: %s ",am2901_source_operand_decode(dev));
 
 	/* Decode ALU operation */
-	printf("%s",am2901_function_decode(dev));
+	printf("Op:%s\n",am2901_function_decode(dev));
 
 	/* Update RAM at address in ADDR_B if RAM_EN is high */
 	if(dev->RAM_EN) { dev->RAM[*(dev->ADDR_B)]=am2901_read_RAMmux(dev); }

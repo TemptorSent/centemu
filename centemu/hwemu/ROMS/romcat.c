@@ -1,24 +1,31 @@
 #include <stdio.h>
 #include <inttypes.h>
+/*
 #define NUMROMS 7
 #define ROMSIZE 2048
+*/
+#define NUMROMS 1
+#define ROMSIZE 256
 
 /* Utility functions to extract ranges of bits, with _R reversing the bit order returned */
-#define BITRANGE(d,s,n) ((d>>s) & ((2LL<<(n-1))-1) )
+#define BITRANGE(d,s,n) ((d>>s) & ((1LL<<n)-1) )
 #define BITRANGE_R(d,s,n) (bitreverse_64(BITRANGE(d,s,n)) >>(64-n))
 
 uint8_t allrom[NUMROMS][ROMSIZE];
 uint8_t mergedrom[ROMSIZE][NUMROMS];
 uint64_t iws[ROMSIZE];
 static char *ROM_files[NUMROMS] = {
-	"CPU_5.rom", /* MWK3.11 - A3.11 */
-	"CPU_2.rom", /* MWF3.11 - B3.11 */
-	"CPU_3.rom", /* MWH3.11 - C3.11 */
-	"CPU_6.rom", /* MWL3.11 - D3.11 */
-	"CPU_7.rom", /* MWM3.11 - E3.11 */
-	"CPU_4.rom", /* MWJ3.11 - F3.11 */
-	"CPU_1.rom"  /* MWE3.11 - ??3.11 */
+	"CPU-6309"
 };
+
+//	"CPU_5.rom", /* MWK3.11 - A3.11 */
+//	"CPU_2.rom", /* MWF3.11 - B3.11 */
+//	"CPU_3.rom", /* MWH3.11 - C3.11 */
+//	"CPU_6.rom", /* MWL3.11 - D3.11 */
+//	"CPU_7.rom", /* MWM3.11 - E3.11 */
+//	"CPU_4.rom", /* MWJ3.11 - F3.11 */
+//	"CPU_1.rom"  /* MWE3.11 - ??3.11 */
+//};
 /*static char *ROM_files[NUMROMS] = {
 	"CPU_1.rom",
 	"CPU_2.rom",
@@ -92,18 +99,19 @@ int read_roms() {
 		}
 		fclose(fp);
 
+		//printf("firstval: %x\n",allrom[i][0]);
 	}
-	return(NUMROMS*ROMSIZE);
+	return((int)ret_code);
 
 }
 
 int merge_roms() {
 	uint64_t iw;
 	for(int i=0; i<ROMSIZE; i++) {
-		printf("\n%04x",i);
+		//printf("\n%04x",i);
 		for(int j=1; j<=NUMROMS; j++) {
 			mergedrom[i][NUMROMS-j]=allrom[j][i];
-			printf(" %02x",mergedrom[i][NUMROMS-j]);
+			//printf(" %02x",mergedrom[i][NUMROMS-j]);
 		}
 		iw=concat_bytes(mergedrom[i]);
 		iws[i]=iw;
@@ -153,25 +161,40 @@ char  *int64_bits_to_binary_string_grouped(char *out, uint64_t in, uint8_t bits,
 	return(out);
 }
 
+char  *byte_bits_to_binary_string_grouped(char *out, uint8_t in, uint8_t bits, uint8_t grouping) {
+	char *p;
+	p=out;
+	bits=bits<9?bits:8;
+	for(int i=bits-1; i>=0; i--) {
+		*(p++)=(in&(1<<i))?'1':'0';
+		if(i&&!(i%grouping)&&grouping){ *(p++)=' '; }
+	}
+	*p='\0';
+	return(out);
+}
 
-int main() {
+
+int main(int argc, char **argv) {
+	int r;
 	uint16_t tmp;
 	uint64_t salad;
 	char binstr[100];
-	read_roms();
-	merge_roms();
+	if( (r=read_roms()) > 0 ) {
+		//printf("read_roms returned: %i\n",r);
+		merge_roms();
 
-	for(int i=0; i<ROMSIZE; i++) {
-		printf("\n%04x",i);
-		int64_bits_to_binary_string(binstr, iws[i], NUMROMS*8,4);
-		int64_bits_to_binary_string_fields(binstr, iws[i], NUMROMS*8,"\x1\x2\x4\x6\x8\xa\xc\xe");
-		printf(" %#016"PRIx64" %s",iws[i],binstr);
-		printf(" 2901H: I=%03o",BITRANGE(iws[i],10,9));
-		printf(" 2909H: FE_PUP=%01o",BITRANGE_R(iws[i],28,2));
+		for(int i=0; i<ROMSIZE; i++) {
+			printf("\n%#04x: %#04x",i,allrom[0][i]);
+			byte_bits_to_binary_string_grouped(binstr, allrom[0][i], NUMROMS*8, 1);
+			printf("   %s",binstr);
+			//int64_bits_to_binary_string_grouped(binstr, iws[i], NUMROMS*8,4);
+			//int64_bits_to_binary_string_fields(binstr, iws[i], NUMROMS*8,"\x1\x2\x4\x6\x8\xa\xc\xe");
+			//printf(" %#016"PRIx64" %s",iws[i],binstr);
+			//printf(" 2901H: I=%03o",BITRANGE(iws[i],10,9));
+			//printf(" 2909H: FE_PUP=%01o",BITRANGE_R(iws[i],28,2));
+		}
+	} else {
+		printf("Could not read ROMS!");
 	}
-	tmp=0xfc18;
-	salad=0xfedcba9765843210LL;
-
-	printf("\n\nbitsald tossing:\n%04x -%llx> %04x\n",tmp,salad,bitsalad_16(salad,tmp));
 
 }
