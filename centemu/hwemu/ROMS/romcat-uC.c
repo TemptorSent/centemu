@@ -176,9 +176,10 @@ char  *byte_bits_to_binary_string_grouped(char *out, uint8_t in, uint8_t bits, u
 
 typedef struct uIW_t {
 	bit_t S1S1_OVR_;
-	bit_t CASE_;
+	twobit_t SHCS;
 	nibble_t A,B;
 	octal_t I876, I543, I210;
+	bit_t CASE_;
 	twobit_t S0S, S1S, S2S;
 	bit_t PUP, FE_;
 	nibble_t D;
@@ -192,6 +193,9 @@ typedef struct uIW_trace_t {
 	twobit_t Seq0Op, Seq1Op, Seq2Op;
 	nibble_t D2_Out;
 	sixbit_t D3_Out, E6_Out, K11_Out, H11_Out, E7_Out;
+	octal_t S_Shift;
+	twobit_t S_Carry;
+	
 } uIW_trace_t;
 
 
@@ -218,11 +222,11 @@ char *decoded_sig[6][8][2] = {
 	},
 	{ // Decoder E6 (from latch E5)
 		{"E6.0",""},
-		{"WRITE PAGETABLE DATA REGISTER",""},
-		{"WRITE REGISTER INPUT LATCH? (RIR)",""},
+		{"WRITE RESULT REGISTER",""},
+		{"WRITE REGISTER SELECT LATCH (RIR)",""},
 		{"E6.3",""},
-		{"WRITE PAGETABLE ADDRESS REGISTER",""},
-		{"WRITE CURRENT PC TO STAGING ADDRESS LATCH","WRITE DATA TO STAGING ADDRESS LATCH"},
+		{"WRITE PAGETABLE BASE ADDRESS REGISTER",""},
+		{"STAGING ADDRESS LATCH SOURCE = CURRENT PC","STAGING ADDRESS LATCH SOURCE = DATA"},
 		{"WRITE DATA TO SEQUENCERS ADDRESS REGISTER",""},
 		{"E6.7",""}
 	},
@@ -259,27 +263,36 @@ char *decoded_sig[6][8][2] = {
 
 };
 
+char *shifter_ops[8]= {
+	"S->RAM7", "?Up1(0?)->RAM7", "Q0->RAM7", "C->RAM7",
+	"RAM7->Q0", "?Dn1(0?)->Q0", "S->Q0", "?Dn3(C?)->Q0"
+};
+
+char *carry_ops[4]= {
+	"?0->Cin", "?1->Cin", "?C->Cin", "?->Cin"
+};
 
 
 void parse_uIW(uIW_t *uIW, uint64_t in) {
 
-	uIW->S1S1_OVR_=BITRANGE(in,54,1);
-	uIW->A=BITRANGE(in,47,4);
-	uIW->B=BITRANGE(in,43,4);
-	uIW->I876=BITRANGE(in,40,3);
-	uIW->I543=BITRANGE(in,37,3);
-	uIW->I210=BITRANGE(in,34,3);
-	uIW->CASE_=BITRANGE(in,33,1);
-	uIW->S2S=BITRANGE(in,31,2);
-	uIW->S0S=BITRANGE(in,29,2);
-	uIW->PUP=BITRANGE(in,28,1);
-	uIW->FE_=BITRANGE(in,27,1);
-	uIW->D=BITRANGE(in,16,11); 
-	uIW->D_E7=BITRANGE(in,13,3);
-	uIW->D_H11=BITRANGE(in,10,3);
-	uIW->D_K11=BITRANGE(in,7,3);
-	uIW->D_E6=BITRANGE(in,4,3);
-	uIW->D_D2D3=BITRANGE(in,0,4);
+	uIW->S1S1_OVR_=BITRANGE(in,54,1); /* Override bit1=1 of S1S when LO, otherwise S1S=S2S */
+	uIW->SHCS=BITRANGE(in,51,2); /* Shifter/Carry Control Select */
+	uIW->A=BITRANGE(in,47,4); /* ALU A Address (Source) */
+	uIW->B=BITRANGE(in,43,4); /* ALU B Address (Source/Dest) */
+	uIW->I876=BITRANGE(in,40,3); /* ALU I876 - Destination Control */
+	uIW->I543=BITRANGE(in,37,3); /* ALU I543 - Operation */
+	uIW->I210=BITRANGE(in,34,3); /* ALU I210 - Operand Source Select */
+	uIW->CASE_=BITRANGE(in,33,1); /* Enable conditoinal logic when LO */
+	uIW->S2S=BITRANGE(in,31,2); /* Sequencer2 Source Select */
+	uIW->S0S=BITRANGE(in,29,2); /* Sequencer0 Source Select */
+	uIW->PUP=BITRANGE(in,28,1); /* Sequencers Pop/Push Direction Select */
+	uIW->FE_=BITRANGE(in,27,1); /* Sequencers (Push/Pop) File Enable (Active LO) */
+	uIW->D=BITRANGE(in,16,11); /* Data */
+	uIW->D_E7=BITRANGE(in,13,3); /* Decoder UE7 */
+	uIW->D_H11=BITRANGE(in,10,3); /* Decoder UH11 */
+	uIW->D_K11=BITRANGE(in,7,3); /* Decoder UK11 */
+	uIW->D_E6=BITRANGE(in,4,3); /* Decoder UE6 */
+	uIW->D_D2D3=BITRANGE(in,0,4); /* Decoders UD2(bit3=0) (low nibble out) and UD3(bit3=1) (high byte out) */
 	
 	
 }
@@ -287,32 +300,77 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 void trace_uIW(uIW_trace_t *t, uint16_t addr, uint64_t in) {
 	t->addr=addr;
 	parse_uIW(&(t->uIW), in);
+
+	/* Fill in S1S from logic on S2S and S1S1_OVR_ signals */
+	/* S1S0 = S2S0, S1S1 = S2S1 -> INV -> NAND S1S1_OVR_ */
+	/* S1S =    NAND( INV(S2S1),                 S1S1_OVR_<<1       ) OR     S1S0 */
+	t->uIW.S1S= ( ~( (~t->uIW.S2S&0x2) & (t->uIW.S1S1_OVR_<<1) )&0x2) | ((t->uIW.S2S)&0x1) ;
+
+	/* Assemble complete sequencer operations for each sequencer */
 	/* S0&S2 S{01} -> (NAND INT_), FE_ -> (NAND INT_) -> INV (cancels), PUP has no NAND */
 	t->Seq0Op=  ( ((~t->uIW.S0S)&0x3)<<2) | (t->uIW.FE_<<1) | (t->uIW.PUP<<0) ;
+	t->Seq1Op=  ( ((~t->uIW.S1S)&0x3)<<2) | (t->uIW.FE_<<1) | (t->uIW.PUP<<0) ;
 	t->Seq2Op=  ( ((~t->uIW.S2S)&0x3)<<2) | (t->uIW.FE_<<1) | (t->uIW.PUP<<0) ;
 
-	/* S1S1 = S2S1 -> INV -> NAND S1S1_OVR_ -> (NAND INT_), S1S0 -> (NAND INT_) */
-	t->Seq1Op=  (
-		~( // (NAND INT_)
-			~( // NAND S1S1_OVR_
-				( // (AND S1S1_OVR_)
-					~( // S1S1 INV
-						(t->uIW.S2S&0x2)>>1
-					) & t->uIW.S1S1_OVR_
-				)
-			)
-		)&0x3)<<3 | ((~t->uIW.S2S)&0x1)<<2 | (t->uIW.FE_<<1) | (t->uIW.PUP<<0) ;
 
 
-	//t->Seq0Op= ~( (t->uIW.S0S<<2) | ((~(t->uIW.FE_)&0x1)<<1) | (t->uIW.PUP) )&0xf;
-	//t->Seq1Op= ~( ((t->uIW.S2S | (t->uIW.S1S_OR_2?2:0))<<2) | ((~(t->uIW.FE_)&0x1)<<1) | (t->uIW.PUP) )&0xf;
-	//t->Seq2Op= ~( (t->uIW.S2S<<2) | ((~(t->uIW.FE_)&0x1)<<1) | (t->uIW.PUP) )&0xf;
+	/* Decode decoder codes (Active LO) */
 	t->D2_Out= ~(  ( t->uIW.D_D2D3&0x8)? 0 : 1<<((t->uIW.D_D2D3)&0x3) )&0xf;
 	t->D3_Out= ~( (t->uIW.D_D2D3&0x8)? 1<<((t->uIW.D_D2D3)&0x7) : 0 )&0x3f;
 	t->E6_Out= ~( 1<<(t->uIW.D_E6) )&0xff;
 	t->K11_Out= ~( 1<<(t->uIW.D_K11) )&0xff;
 	t->H11_Out= ~( 1<<(t->uIW.D_H11) )&0xff;
 	t->E7_Out= ~( 1<<(t->uIW.D_E7) )&0xff;
+
+	/* UF6 - Carry Control *
+	 * Select from 
+	 * Output enables driven by ?
+	 * Carry control input connections:
+	 *                         SHCS=0    SHCS=1     SHCS=2    SHCS=3
+	 *     ??=0: (Za Enabled)  I0a=?     I1a=?      I2a=?     I3a=?
+	 *     ??=1: (Zb Enabled)  I0b=?     I1b=?      I2b=?     I3b=?
+	 *
+	 * Carry control output connections:
+	 *  Za -> ALU0.Cn (UF10)
+	 *
+	 *  0,0 -> ? Zero?
+	 *  0,1 -> ? One?
+	 *  0,2 -> ? Carry?
+	 *  0,3 -> ? ??
+	 */
+	t->S_Carry=t->uIW.SHCS;
+
+
+	/* UH6 - Shift Control *
+	 * Select from 
+	 * Output enables driven by ALU.I7 -> OEa_, -> INV -> OEb_
+	 * ALU.I7=0 -> Shift Down, ALU.I7=1 Shift Up
+	 * Shifter input connections:
+	 *                         SHCS=0     SHCS=1     SHCS=2     SHCS=3
+	 * ALU.I7=0: (Za Enabled)  I0a=S(2b)  I1a=?(1b)  I2a=Q0     I3a=C
+	 * ALU.I7=1: (Zb Enabled)  I0b=RAM7   I1b=?(1a)  I2b=S(0a)  I3b=
+	 *
+	 * Shifter output connections:
+	 * Za -> RAM7[ALU1.RAM3] (UF11), UJ10.I5
+	 * Zb -> Q0[ALU0.Q0] (UF10), UJ10.I7
+	 *
+	 * 0,0:    S->RAM7  SRA (Sign extend S->MSB)
+	 * 0,1:    ?->RAM7  SRL? (Zero?)
+	 * 0,2:   Q0->RAM7  (SRA/RRR) Half-word (Q0 of High byte shifts into MSB of Low byte)
+	 * 0,3:    C->RAM7  RRR (Rotate carry into MSB)
+	 *
+	 * 1,0: RAM7->Q0    RLR/SLR Half-word? (RAM7->Q0)
+	 * 1,1:    ?->Q0    SLR? (Zero?)
+	 * 1,2:    S->Q0    ?
+	 * 1,3:    ?->Q0    (C?) RLR?
+	 *
+	 *
+	 * See microcode @ 0x0d2-0x0e2 for 16 bit shift up through Q
+	 */
+	t->S_Shift=(t->uIW.I876&0x2?4:0)|t->uIW.SHCS;
+
+
+
 }	
 
 void print_decoder_values(enum decoder_enum d, uint8_t v) {
@@ -326,7 +384,8 @@ void print_decoder_values(enum decoder_enum d, uint8_t v) {
 }
 
 void print_uIW_trace(uIW_trace_t *t) {
-	printf("Data: D=%#05x\n", t->uIW.D);
+	printf("Data: D=%#05x (D_=%#04x)", t->uIW.D, (~t->uIW.D)&0xff);
+	printf(" Shifter: %s / Carry Select: %s (SHCS=%0x)\n",shifter_ops[t->S_Shift], carry_ops[t->S_Carry], t->uIW.SHCS);
 	printf("ALUs: A=%01x B=%01x RS=%s %s -> %s\n",
 		t->uIW.A,
 		t->uIW.B,

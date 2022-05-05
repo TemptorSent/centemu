@@ -1,0 +1,91 @@
+/* Note: */
+0x8b - Privledged Instructions (No protected mode implemented?)
+
+/* Control instructions */
+008b - HLT Halt System
+0x01 - NOP
+0x19 - (F) Set Fault
+0x4f - (F) Reset Fault
+0x8b - EI Enable Interrupts
+0x8b - DI Disable Interrupts
+0x85 - (L) SL Set Link
+0xaf - (L) RL Reset Link
+0x7b - (L) CL Complement Link
+0x93 - RSR Return from Subroutine
+0x8b - RI Return from Interrupt
+0x8e - RIM Return from Interrupt Modified
+0xca - (was ELO - Enable Link Out on ee200)
+0x7e - PCX - Transfer PC to X regiser
+0x8b - DLY 4.55ms Delay
+
+/* Conditional branch instructions */
+0xfd - (L) BL/BNL Branch if Link Set/Clear
+0xfc - (F) BF/BNF Branch if Fault Set/Clear
+0xfb - (V) BZ/BNZ Branch if Equal-to Zero / Not-equal-to Zero
+0xfa - (M) BM/BP Branch if Minus Set/Clear
+0x56 - BGZ Branch if Greater-than Zero
+0xf9 - BLE Branch if Less-than or Equal-to Zero
+0xfe - BS1 Branch if Sense Switch 1 is set
+0xee - BS2 Branch if Sense Switch 2 is set
+0xde - BS3 Branch if Sense Switch 3 is set
+0xce - BS4 Branch if Sense Switch 4 is set
+0xba - (was BTM - Branch on TTY MARK on ee200)
+0x07 - (was BEP - Branch on Even Parity on ee200)
+
+/* ALU Operations - One operand */
+0xef - R Explicit byte sized one-operand ALU instruction
+0x1d - A Implicit byte INCA Increment B by 1
+0x1e - A Implicit byte DCAB Decrement B by 1
+0x22 - A Implicit byte CLAB Clear A
+0x23 - A Implicit byte IVAB Invert A
+0x24 - A Implicit byte SRAB Shift A right by 1
+0x21 - A Implicit byte SLAB Shift A left by 1
+
+0xf8 - R Explicit word sized one-operand ALU instruction
+0x2e - A Implicit word INA Increment A by 1
+0x2f - A Implicit word DCA Decrement A by 1
+0x2a - A Implicit word CLA Clear A
+0x25 - A Implicit word IVA Invert A
+0x4d - A Implicit word SRA Shift register A right by 1
+0x4e - A Implicit word SLA Shift register A left by 1
+0x1f - X Implicit word INX/DCX Increment/Decrement X by 1
+
+/* ALU Operations - Two operand*/
+0x45 - R,R Explicit byte sized two-operand ALU instruction
+0x41 - rr  Implicit byte sized two-operand ALU instruction
+0x89 - R,R Explicit Word sized two-operand ALU instruction
+0x43 - rr  Implicit Word sized two-operand ALU instruction
+0x40 - rr  Implict Xrr register transfer
+
+
+/* JMP/JSR Operations */
+0x09 -   Literal JMP
+0x89 -   Literal JSR
+0x54 -   Addressed JMP (Same as A Addressed Word LD/ST)
+0x64 -   Addressed JSR (Same as X Addressed Word LD/ST)
+
+/* Reg A Memory Operations */
+0x1b - A Literal LDAB
+0x15 - A Literal LDA
+0x2b - A Literal STAB
+0x3c - A Literal STA
+0x51 - A Addressed Byte LDAB/STAB
+0x54 - A Addressed Word LDA/STA
+0x33 - A Implicit LDA(B)/STA(B) Indexed by (A)
+0x35 - A Implicit LDA(B)/STA(B) Indexed by (B)-(P)
+
+/* Reg B Memory Operations */
+0x2c - B Literal LDBB
+0x3e - B Literal LDB
+0x26 - B Literal STBB
+0x30 - B Literal STB
+0x60 - B Addressed Byte LDBB/STBB
+0x62 - B Addressed Word LDB/STB
+0x34 - B Implicit LDB(B)/STB(B) Indexed by (A)
+0x36 - B Implicit LDB(B)/STB(B) Indexed by (B)-(P)
+
+/* Reg X Memory Operations */
+0x31 - X Literal STX
+0x14 - X Literal LDX
+0x65 - X Addressed Word LDX
+0x64 - X Addressed Word STX (Same as JSR)
