@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include "../logic-common.h"
+#include "../clockline.h"
 #include "../ginsumatic.h"
 #include "../am2901.h"
 #include "../am2909.h"
@@ -36,142 +37,40 @@ static char *ROM_files[NUMROMS] = {
 };
 */
 
-/* Concatenate an array of bytes into an unsigned 64-bit int */
-uint64_t concat_bytes(uint8_t bytes[]){
-	uint64_t out=0,in;
-	for(int i=0;i<NUMROMS;i++) {
-		in=bytes[i];
-		//printf(" in[%u]=%x ",i,in);
-		out = out | (in<<((NUMROMS-i-1)*8));
-	}
-	return(out);
-}
+typedef struct cpu_state_t {
+	struct dev {
+		am2901_device_t ALU0;
+		am2901_device_t ALU1;
+		am2909_device_t Seq0;
+		am2909_device_t Seq1;
+		am2911_device_t Seq2;
+	} dev;
 
-uint64_t bitreverse_64(uint64_t in) {
-	uint64_t out=0;
-	for(int i=63;i>=0;i--) {
-		//printf("%u %#018"PRIx64" %#018"PRIx64"\n",i,in,out);
-		out |= in&0x1;
-		if(!i){return(out);}
-		out <<= 1;
-		in >>= 1;
-		//printf("%u %#018"PRIx64" %#018"PRIx64"\n",i,in,out);
-	}
-}
+	struct Shifter {
 
-uint16_t bitsalad_16(uint64_t order, uint16_t d) {
-	uint8_t pos;
-	uint16_t out;
-	for(int i=0; i<16; i++) {
-		pos=BITRANGE(order,i*4,4);
-		if(d&1<<i){out |= 1<<pos;}
-	}
-	return(out);
-}
+		bit_t DownLine, UpLine;
+	} Shifter;
 
-uint8_t bitsalad_8(uint32_t order, uint8_t d) {
-	uint8_t pos;
-	uint8_t out;
-	for(int i=0; i<16; i++) {
-		pos=BITRANGE(order,i*4,4);
-		if(d&1<<i){out |= 1<<pos;}
-	}
-	return(out);
-}
+	struct ALU {
+		clockline_t cl;
+		octal_t I876, I543, I210;
+		nibble_t ADDR_A, ADDR_B;
+		nibble_t Dlow, Dhigh;
+		bit_t Cin, Chalf, Cout;
+		bit_t RAM3, RAM7;
+		bit_t RAM0Q7;
+		bit_t Q0, Q3;
+		bit_t FZ, F3, F7;
+		bit_t P_0,G_0, P_1,G_1;
+		bit_t nibbleOVF, OVF;
+		nibble_t Flow, Fhigh;
+		bit_t OE_;
+	} ALU;
 
-int read_roms() {
-	FILE *fp;
-	size_t ret_code;
-
-	for(int  i=0; i<NUMROMS; i++) {
-		fp=fopen(ROM_files[i],"rb");
-		ret_code=fread(allrom[i],1,ROMSIZE,fp);
-		if(ret_code != ROMSIZE) {
-			if(feof(fp)) {
-				printf("Unexpected EOF while reading %s: Only got %u byte of an expected %s.\n",
-					ROM_files[i], ret_code, ROMSIZE);
-			} else if(ferror(fp)){
-				printf("Failed while reading %s!\n",ROM_files[i]);
-			}
-			fclose(fp);
-			return(-1);
-		}
-		fclose(fp);
-
-		//printf("firstval: %x\n",allrom[i][0]);
-	}
-	return((int)ret_code);
-
-}
-
-int merge_roms() {
-	uint64_t iw;
-	for(int i=0; i<ROMSIZE; i++) {
-		//printf("\n%04x",i);
-		for(int j=0; j<NUMROMS; j++) {
-			mergedrom[i][j]=allrom[j][i];
-			//printf(" %02x",mergedrom[i][j]);
-		}
-		iw=concat_bytes(mergedrom[i]);
-		iws[i]=iw;
-		/*
-		printf("\tI:%03o A':%x A:%x  %#018"PRIx64"",
-			BITRANGE(iw,34,9),
-			BITRANGE(iw,44,4),
-			BITRANGE_R(iw,44,4),
-			iw
-		);
-		*/
-	}
-
-	return(ROMSIZE);
-}
-/* Represent specified number of bits of a 64-bit integer as an ascii string of '1's, '0's and ' ' */
-/* Provide an output buffer long enough to hold all bits plus spaces between fields plus NULL */
-/* Split sequences of bits into fields of specified widths given as byte string ("\x2\x10\x8..") */
-char  *int64_bits_to_binary_string_fields(char *out, uint64_t in, uint8_t bits, char *fieldwidths) {
-	char *p;
-	char *f;
-	uint8_t fc=0;
-	f=fieldwidths;
-	p=out;
-	bits=bits<65?bits:64;
-	for(int i=bits-1; i>=0; i--) {
-		if(!fc && *f) { fc=*(f++); }
-		*(p++)=(in&(1LL<<i))?'1':'0';
-		if(!--fc){ *(p++)=' '; }
-	}
-	*p='\0';
-	return(out);
-}
-
-/* Represent specified number of bits of a 64-bit integer as an ascii string of '1's and '0's */
-/* Provide an output buffer long enough to hold all bits plus spaces between fields plus NULL */
-/* Split sequences of bits into space separated groups of specified size */
-char  *int64_bits_to_binary_string_grouped(char *out, uint64_t in, uint8_t bits, uint8_t grouping) {
-	char *p;
-	p=out;
-	bits=bits<65?bits:64;
-	for(int i=bits-1; i>=0; i--) {
-		*(p++)=(in&(1LL<<i))?'1':'0';
-		if(i&&!(i%grouping)&&grouping){ *(p++)=' '; }
-	}
-	*p='\0';
-	return(out);
-}
-
-char  *byte_bits_to_binary_string_grouped(char *out, uint8_t in, uint8_t bits, uint8_t grouping) {
-	char *p;
-	p=out;
-	bits=bits<9?bits:8;
-	for(int i=bits-1; i>=0; i--) {
-		*(p++)=(in&(1<<i))?'1':'0';
-		if(i&&!(i%grouping)&&grouping){ *(p++)=' '; }
-	}
-	*p='\0';
-	return(out);
-}
-
+	struct Bus {
+		byte_t Dint;
+	} Bus;
+} cpu_state_t;
 
 
 typedef struct uIW_t {
@@ -187,10 +86,11 @@ typedef struct uIW_t {
 	nibble_t D_D2D3;
 } uIW_t;
 
+
 typedef struct uIW_trace_t {
 	uint16_t addr;
 	uIW_t uIW;
-	twobit_t Seq0Op, Seq1Op, Seq2Op;
+	nibble_t Seq0Op, Seq1Op, Seq2Op;
 	nibble_t D2_Out;
 	sixbit_t D3_Out, E6_Out, K11_Out, H11_Out, E7_Out;
 	octal_t S_Shift;
@@ -216,7 +116,7 @@ char *decoded_sig[6][8][2] = {
 		{"D3.2 D5.5",""},
 		{"READ IL REGISTER",""},
 		{"D3.4 D5.2",""},
-		{"READ CONSTANT",""},
+		{"READ uC DATA CONSTANT",""},
 		{"",""},{"",""}
 
 	},
@@ -272,6 +172,55 @@ char *carry_ops[4]= {
 	"?0->Cin", "?1->Cin", "?C->Cin", "?->Cin"
 };
 
+int read_roms() {
+	FILE *fp;
+	size_t ret_code;
+
+	for(int  i=0; i<NUMROMS; i++) {
+		fp=fopen(ROM_files[i],"rb");
+		ret_code=fread(allrom[i],1,ROMSIZE,fp);
+		if(ret_code != ROMSIZE) {
+			if(feof(fp)) {
+				printf("Unexpected EOF while reading %s: Only got %u byte of an expected %s.\n",
+					ROM_files[i], ret_code, ROMSIZE);
+			} else if(ferror(fp)){
+				printf("Failed while reading %s!\n",ROM_files[i]);
+			}
+			fclose(fp);
+			return(-1);
+		}
+		fclose(fp);
+
+		//printf("firstval: %x\n",allrom[i][0]);
+	}
+	return((int)ret_code);
+
+}
+
+int merge_roms() {
+	uint64_t iw;
+	for(int i=0; i<ROMSIZE; i++) {
+		//printf("\n%04x",i);
+		for(int j=0; j<NUMROMS; j++) {
+			mergedrom[i][j]=allrom[j][i];
+			//printf(" %02x",mergedrom[i][j]);
+		}
+		iw=concat_bytes_64(NUMROMS,mergedrom[i]);
+		iws[i]=iw;
+		/*
+		printf("\tI:%03o A':%x A:%x  %#018"PRIx64"",
+			BITRANGE(iw,34,9),
+			BITRANGE(iw,44,4),
+			BITRANGE_R(iw,44,4),
+			iw
+		);
+		*/
+	}
+
+	return(ROMSIZE);
+}
+
+
 
 void parse_uIW(uIW_t *uIW, uint64_t in) {
 
@@ -297,7 +246,33 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 	
 }
 
-void trace_uIW(uIW_trace_t *t, uint16_t addr, uint64_t in) {
+void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
+	st->ALU.I876= t->uIW.I876;
+	st->ALU.I543= t->uIW.I543;
+	st->ALU.I210= t->uIW.I210;
+	st->ALU.ADDR_A= t->uIW.A;
+	st->ALU.ADDR_B= t->uIW.B;
+	st->ALU.Dlow=  (st->Bus.Dint&0x0f)>>0;
+	st->ALU.Dhigh= (st->Bus.Dint&0xf0)>>4;
+	st->ALU.Cin= (t->S_Carry==3?0:t->S_Carry==2?st->ALU.Cout:t->S_Carry?1:0);
+
+	if(t->S_Shift&0x4) {
+		st->Shifter.UpLine= (t->S_Shift==7?st->ALU.Cout:t->S_Shift==6?st->ALU.F7:t->S_Shift==5?0:st->ALU.RAM7);
+		st->ALU.Q0=st->Shifter.UpLine;
+	} else {
+		st->Shifter.DownLine= (t->S_Shift==3?st->ALU.Cout:t->S_Shift==2?st->ALU.Q0:t->S_Shift?0:st->ALU.F7);
+		st->ALU.RAM7=st->Shifter.DownLine;
+	}
+
+	st->ALU.cl.clk=CLK_LO;
+	do{
+		am2901_update(&st->dev.ALU0);
+		am2901_update(&st->dev.ALU1);
+		clock_advance(&st->ALU.cl);
+	} while(st->ALU.cl.clk);
+}
+
+void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) {
 	t->addr=addr;
 	parse_uIW(&(t->uIW), in);
 
@@ -369,9 +344,35 @@ void trace_uIW(uIW_trace_t *t, uint16_t addr, uint64_t in) {
 	 */
 	t->S_Shift=(t->uIW.I876&0x2?4:0)|t->uIW.SHCS;
 
+	uIW_trace_run_ALUs(cpu_st, t);
+	
+}
+
+void init_ALUs(cpu_state_t *st) {
+	am2901_init(&st->dev.ALU0, "ALU0", &st->ALU.cl.clk,
+		&st->ALU.I210, &st->ALU.I543, &st->ALU.I876,
+		&st->ALU.RAM0Q7, &st->ALU.RAM3,
+		&st->ALU.ADDR_A, &st->ALU.ADDR_B,
+		&st->ALU.Dlow, &st->ALU.Cin,
+		&st->ALU.P_0, &st->ALU.G_0,
+		&st->ALU.Chalf, &st->ALU.nibbleOVF,
+		&st->ALU.Q0, &st->ALU.Q3,
+		&st->ALU.FZ, &st->ALU.F3,
+		&st->ALU.Flow, &st->ALU.OE_);
+
+	am2901_init(&st->dev.ALU1, "ALU1", &st->ALU.cl.clk,
+		&st->ALU.I210, &st->ALU.I543, &st->ALU.I876,
+		&st->ALU.RAM3, &st->ALU.RAM7,
+		&st->ALU.ADDR_A, &st->ALU.ADDR_B,
+		&st->ALU.Dhigh, &st->ALU.Chalf,
+		&st->ALU.P_1, &st->ALU.G_1,
+		&st->ALU.Cout, &st->ALU.OVF,
+		&st->ALU.Q3, &st->ALU.RAM0Q7,
+		&st->ALU.FZ, &st->ALU.F7,
+		&st->ALU.Fhigh, &st->ALU.OE_);
+}
 
 
-}	
 
 void print_decoder_values(enum decoder_enum d, uint8_t v) {
 	octal_t p;
@@ -384,7 +385,7 @@ void print_decoder_values(enum decoder_enum d, uint8_t v) {
 }
 
 void print_uIW_trace(uIW_trace_t *t) {
-	printf("Data: D=%#05x (D_=%#04x)", t->uIW.D, (~t->uIW.D)&0xff);
+	printf("Data: D/uADDR=%#05x (D_=%#04x)", t->uIW.D, (~t->uIW.D)&0xff);
 	printf(" Shifter: %s / Carry Select: %s (SHCS=%0x)\n",shifter_ops[t->S_Shift], carry_ops[t->S_Carry], t->uIW.SHCS);
 	printf("ALUs: A=%01x B=%01x RS=%s %s -> %s\n",
 		t->uIW.A,
@@ -412,15 +413,23 @@ void print_uIW_trace(uIW_trace_t *t) {
 
 }
 
+void init_cpu_state(cpu_state_t *st) {
+	clock_init(&st->ALU.cl,"ALU Clock", CLK_LO);
+	init_ALUs(st);
+}
+
 int main(int argc, char **argv) {
 	int r;
 	uint16_t tmp;
 	uint64_t salad;
 	char binstr[100];
+	cpu_state_t cpu_st;
 	uIW_trace_t trace[ROMSIZE];
 	if( (r=read_roms()) > 0 ) {
 		printf("read_roms returned: %i\n",r);
 		merge_roms();
+
+		init_cpu_state(&cpu_st);
 
 		for(int i=0; i<ROMSIZE; i++) {
 			//printf("\n%#06x: %#06x",i,allrom[0][i]);
@@ -430,7 +439,7 @@ int main(int argc, char **argv) {
 			int64_bits_to_binary_string_fields(binstr, iws[i], NUMROMS*8,
 				"\x1\1\1\x2\x4\x4\x3\x3\x3\x1\x2\x2\x2\x3\x4\x4\x3\x3\x3\x3\x4");
 			printf(" %#06x: %#018"PRIx64" %s\n",i,iws[i],binstr);
-			trace_uIW(&trace[i],i,iws[i]);
+			trace_uIW(&cpu_st, &trace[i],i,iws[i]);
 			print_uIW_trace(&trace[i]);
 		/*	
 			printf(" 2901:");
