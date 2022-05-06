@@ -157,7 +157,7 @@ char *am2901_function_decode(am2901_device_t *dev) {
 
 char *am2901_clock_state_setup_H(am2901_device_t *dev){
 	/* Decode destination portion of instruction */
-	printf("ALU Dest: %s\n",am2901_destination_decode(dev));
+	am2901_destination_decode(dev);
 	return(0);
 }
 
@@ -176,10 +176,10 @@ char *am2901_clock_state_hold_L(am2901_device_t *dev){
 
 char *am2901_clock_state_setup_L(am2901_device_t *dev){
 	/* Decode source operands portion of instruction */
-	printf("ALU Src: %s ",am2901_source_operand_decode(dev));
+	am2901_source_operand_decode(dev);
 
 	/* Decode ALU operation */
-	printf("Op:%s\n",am2901_function_decode(dev));
+	am2901_function_decode(dev);
 
 	/* Update RAM at address in ADDR_B if RAM_EN is high */
 	if(dev->RAM_EN) { dev->RAM[*(dev->ADDR_B)]=am2901_read_RAMmux(dev); }
@@ -199,7 +199,7 @@ char *am2901_clock_state_hold_H(am2901_device_t *dev){
 }
 
 char *am2901_update(am2901_device_t *dev) {
-	printf("clk=%s\n",CLOCK_STATE_NAME_FULL(*(dev->clk)));
+	//printf("clk=%s\n",CLOCK_STATE_NAME_FULL(*(dev->clk)));
 	switch(*(dev->clk)) {
 		case CLK_LO:
 			am2901_clock_state_hold_L(dev);
@@ -345,7 +345,7 @@ void am2901_print_state(am2901_device_t *dev) {
 	printf("\nA=%0x, B=%0x, D=%0x, Q=%0x", dev->A, dev->B, *(dev->D), dev->Q);
 	printf(" R:[%c]=%0x, S:[%c]=%0x, C=%0x", dev->Rmux, am2901_read_Rmux(dev), dev->Smux, am2901_read_Smux(dev), *(dev->Cn));
 	printf(" F=%0x ",dev->F );
-	fsym=am2901_function_symbol_reduced[*(dev->Cn)?0:1][dev->Smux=='Z'?2:dev->Rmux=='Z'?1:0][*(dev->I543)];
+	fsym=am2901_function_symbol_reduced[*(dev->Cn)?0:1][dev->Smux=='Z'?2:dev->Rmux=='Z'?1:0][(uint8_t)*(dev->I543)&0x7];
 	while(*fsym) {
 		if(*fsym=='R') { printf("%c(%0x)",dev->Rmux,am2901_read_Rmux(dev)); }
 		else if(*fsym=='S') { printf("%c(%0x)",dev->Smux,am2901_read_Smux(dev)); }
@@ -364,12 +364,14 @@ void am2901_print_state(am2901_device_t *dev) {
 		else { printf(" RAM3=%0x(%c)", *(dev->RAM3), dev->RAM3_DIR ); }
 	} else { printf("RAM: N/C"); }
 	if(dev->Q_EN) {
-		printf("Q=%0x%s",dev->Qmux=='N'?dev->F:dev->Q,dev->Qmux=='D'?"/2":dev->Qmux=='U'?"*2":"");
-		if(dev->Q0_DIR == 'Z') { printf("Q0=HiZ"); }
+		printf(" Q=%0x%s",dev->Qmux=='N'?dev->F:dev->Q,dev->Qmux=='D'?"/2":dev->Qmux=='U'?"*2":"");
+		if(dev->Q0_DIR == 'Z') { printf(" Q0=HiZ"); }
 		else { printf(" Q0=%0x(%c)", *(dev->Q0), dev->Q0_DIR ); }
-		if(dev->Q3_DIR == 'Z') { printf("Q3=HiZ"); }
+		if(dev->Q3_DIR == 'Z') { printf(" Q3=HiZ"); }
 		else { printf(" Q3=%0x(%c)", *(dev->Q3), dev->Q3_DIR ); }
-	} else { printf("Q: N/C"); }
+	} else { printf(" Q: N/C"); }
+
+	printf("\n");
 }
 //am2901_init( clk, id, I210, I543, I876, RAM0, RAM3, ADDR_A, ADDR_B, D, Cn, P_, G_, Co, OVR, Q0, Q3, FZ, F3, Y, OE_);
 

@@ -5,6 +5,7 @@
 #include "../ginsumatic.h"
 #include "../am2901.h"
 #include "../am2909.h"
+#include "../rom-common.h"
 
 #define NUMROMS 7
 #define ROMSIZE 2048
@@ -13,9 +14,9 @@
 #define BITRANGE(d,s,n) ((d>>s) & ((1LL<<(n))-1LL) )
 #define BITRANGE_R(d,s,n) (bitreverse_64(BITRANGE(d,s,n)) >>(64-n))
 
-uint8_t allrom[NUMROMS][ROMSIZE];
-uint8_t mergedrom[ROMSIZE][NUMROMS];
-uint64_t iws[ROMSIZE];
+static uint8_t allrom[NUMROMS][ROMSIZE];
+static uint8_t mergedrom[ROMSIZE][NUMROMS];
+static uint64_t iws[ROMSIZE];
 static char *ROM_files[NUMROMS] = {
 	"CPU_5.rom", /* MWK3.11 - A3.11 */
 	"CPU_2.rom", /* MWF3.11 - B3.11 */
@@ -25,6 +26,10 @@ static char *ROM_files[NUMROMS] = {
 	"CPU_4.rom", /* MWJ3.11 - F3.11 */
 	"CPU_1.rom"  /* MWE3.11 - ??3.11 */
 };
+
+#define MAPROMSIZE 0x100
+uint8_t maprom[MAPROMSIZE];
+static char *MAPROM_file = "CPU-6309";
 
 /*static char *ROM_files[NUMROMS] = {
 	"CPU_1.rom",
@@ -67,9 +72,26 @@ typedef struct cpu_state_t {
 		bit_t OE_;
 	} ALU;
 
+	struct Seq {
+		bit_t RE_; // Seq AR input enable 
+	} Seq;
+
 	struct Bus {
 		byte_t Dint;
+		byte_t F;
 	} Bus;
+
+	struct Reg {
+		byte_t RIR; // Register Index Register
+		nibble_t ILR; // Interrupt Level Register
+		byte_t DR; // Data Register
+		byte_t SR; // Status Register
+		byte_t RR; // Result Register
+		word_t ALS; // Address Latch, Staging
+		word_t ALO; // Address Latch, Output
+		byte_t PTBAR; // Page Table Base Address Register
+		byte_t RF[0x100]; // Register File (ABXYZSCPx2x16)
+	} Reg;
 } cpu_state_t;
 
 
@@ -81,7 +103,8 @@ typedef struct uIW_t {
 	bit_t CASE_;
 	twobit_t S0S, S1S, S2S;
 	bit_t PUP, FE_;
-	nibble_t D;
+	word_t uADDR;
+	byte_t DATA_;
 	octal_t D_E6,D_E7,D_H11,D_K11;
 	nibble_t D_D2D3;
 } uIW_t;
@@ -95,13 +118,31 @@ typedef struct uIW_trace_t {
 	sixbit_t D3_Out, E6_Out, K11_Out, H11_Out, E7_Out;
 	octal_t S_Shift;
 	twobit_t S_Carry;
+	byte_t Dint;
+	byte_t F;
 	
 } uIW_trace_t;
 
 
 enum decoder_enum { D_D2, D_D3, D_E6, D_K11, D_H11, D_E7 };
+enum decoder_outputs {
+	D_D2_0_D44=0x00, D_D2_READ_REG=0x02, D_D2_READ_ADDR_MSB=0x04, D_D2_3_D4_3=0x06,
 
-char *decoded_sig[6][8][2] = {
+	D_D3_0_D5_0=0x10, D_D3_1_D5_1=0x12, D_D3_3_D5_5=0x14, D_D3_READ_ILR=0x16, D_D3_4_D5_2=0x18, D_D3_READ_uCDATA=0x1a,
+
+	D_E6_0=0x20, D_E6_WRITE_RR=0x22, D_E6_WRITE_RIR=0x26, D_E6_3, D_E6_WRITE_PTBAR=0x28,
+	D_E6_ALS_SRC_PC=0x2a, D_E6_ALS_SRC_DATA=0x2b, D_E6_WRITE_SEQ_AR=0x2c, D_E6_7=0x2e,
+
+	D_K11_0=0x30, D_K11_1=0x32, D_K11_2=0x34, D_K11_3=0x36, D_K11_4=0x38, D_K11_5=0x3a, D_K11_6=0x3c, D_K11_WRITE_DR=0x3e,
+
+	D_H11_0=0x40, D_H11_1=0x42, D_H11_2=0x44, D_H11_WRITE_ALS_MSB=0x46,
+	D_H11_4=0x48, D_H11_5=0x4a, D_H11_READ_MAPROM=0x4c, D_H11_7=0x4e,
+
+	D_E7_0=0x50, D_E7_1=0x52, D_E7_WRITE_SR=0x54, D_E7_3=0x56, D_E7_4=0x58, D_E7_5=0x5a, D_E7_6=0x5c, D_E7_7=0x5e
+};
+
+
+static char *decoded_sig[6][8][2] = {
 	{ // Decoder D2 -> latch UD4
 		{"D2.0 D4.4",""},
 		{"READ REGISTER",""},
@@ -163,16 +204,24 @@ char *decoded_sig[6][8][2] = {
 
 };
 
-char *shifter_ops[8]= {
+static char *shifter_ops[8]= {
 	"S->RAM7", "?Up1(0?)->RAM7", "Q0->RAM7", "C->RAM7",
 	"RAM7->Q0", "?Dn1(0?)->Q0", "S->Q0", "?Dn3(C?)->Q0"
 };
 
-char *carry_ops[4]= {
+static char *carry_ops[4]= {
 	"?0->Cin", "?1->Cin", "?C->Cin", "?->Cin"
 };
 
 int read_roms() {
+	int r;
+	for(int i=0; i<NUMROMS; i++) {
+		r=rom_read_file(ROM_files[i],ROMSIZE,allrom[i]);
+		if(r) { printf("Error %x reading file %s\n", r, ROM_files[i]); return(r); }
+	}
+	r=rom_read_file(MAPROM_file, MAPROMSIZE, maprom);
+	return(r);
+/*
 	FILE *fp;
 	size_t ret_code;
 
@@ -194,7 +243,7 @@ int read_roms() {
 		//printf("firstval: %x\n",allrom[i][0]);
 	}
 	return((int)ret_code);
-
+*/
 }
 
 int merge_roms() {
@@ -202,7 +251,7 @@ int merge_roms() {
 	for(int i=0; i<ROMSIZE; i++) {
 		//printf("\n%04x",i);
 		for(int j=0; j<NUMROMS; j++) {
-			mergedrom[i][j]=allrom[j][i];
+			mergedrom[i][NUMROMS-j-1]=allrom[j][i];
 			//printf(" %02x",mergedrom[i][j]);
 		}
 		iw=concat_bytes_64(NUMROMS,mergedrom[i]);
@@ -236,7 +285,8 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 	uIW->S0S=BITRANGE(in,29,2); /* Sequencer0 Source Select */
 	uIW->PUP=BITRANGE(in,28,1); /* Sequencers Pop/Push Direction Select */
 	uIW->FE_=BITRANGE(in,27,1); /* Sequencers (Push/Pop) File Enable (Active LO) */
-	uIW->D=BITRANGE(in,16,11); /* Data */
+	uIW->uADDR=BITRANGE(in,16,11); /* uC Address (11bits, lower 8 multiplex with DATA_) */
+	uIW->DATA_=BITRANGE(in,16,8); /* Data (inverted) (=low 8 bits of uC Address) */
 	uIW->D_E7=BITRANGE(in,13,3); /* Decoder UE7 */
 	uIW->D_H11=BITRANGE(in,10,3); /* Decoder UH11 */
 	uIW->D_K11=BITRANGE(in,7,3); /* Decoder UK11 */
@@ -244,6 +294,68 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 	uIW->D_D2D3=BITRANGE(in,0,4); /* Decoders UD2(bit3=0) (low nibble out) and UD3(bit3=1) (high byte out) */
 	
 	
+}
+
+void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
+	byte_t v,e;
+	for(int i=0; i<7; i++) {
+		switch(i) {
+			case 0: v=t->D2_Out; break;
+			case 1: v=t->D3_Out; break;
+			case 2: v=t->E6_Out; break;
+			case 3: v=t->K11_Out; break;
+			case 4: v=t->H11_Out; break;
+			case 5: v=t->E7_Out; break;
+		}
+		for(int j=0; j<8; j++) {
+			e= (i<<4) | (j<<1) | ( (v&(1<<j))? 1:0);
+			switch(e) {
+				case D_D2_READ_REG: // This needs an enable to toggle between IL and RIR for high nibble
+					st->Bus.Dint= st->Reg.RF[(st->Reg.ILR<<4) | (st->Reg.RIR&0x0f)]; break;
+				case D_D2_READ_ADDR_MSB: break;
+				case D_D3_READ_ILR: st->Bus.Dint=st->Reg.ILR; break;
+				case D_D3_READ_uCDATA: st->Bus.Dint= ~t->uIW.DATA_; break;
+				case D_H11_READ_MAPROM: st->Bus.F= maprom[st->Bus.Dint]; break; 
+				default: break;
+
+			}
+		}
+	}
+}
+
+
+void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
+	byte_t v,e;
+
+
+	/* Set/Clear default as needed first: */
+	st->Seq.RE_=1;
+
+	for(int i=0; i<7; i++) {
+		switch(i) {
+			case 0: v=t->D2_Out; break;
+			case 1: v=t->D3_Out; break;
+			case 2: v=t->E6_Out; break;
+			case 3: v=t->K11_Out; break;
+			case 4: v=t->H11_Out; break;
+			case 5: v=t->E7_Out; break;
+		}
+		for(int j=0; j<8; j++) {
+			e= (i<<4) | (j<<1) | ( (v&(1<<j))? 1:0);
+			switch(e) {
+				case D_E6_WRITE_RR: st->Reg.RR=st->Bus.Dint; break;
+				case D_E6_WRITE_RIR: st->Reg.RIR=st->Bus.Dint; break;
+				case D_E6_WRITE_PTBAR: st->Reg.PTBAR=st->Bus.Dint; break;
+				case D_E6_WRITE_SEQ_AR: st->Seq.RE_=0; break;
+				case D_K11_WRITE_DR: st->Reg.DR=st->Bus.Dint; break;
+				case D_H11_WRITE_ALS_MSB: st->Reg.ALS= (st->Reg.ALS&0xff00) | (st->Bus.Dint<<8); break;
+				case D_E7_WRITE_SR: st->Reg.SR= st->Bus.Dint; break;
+
+				default: break;
+
+			}
+		}
+	}
 }
 
 void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
@@ -270,6 +382,13 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 		am2901_update(&st->dev.ALU1);
 		clock_advance(&st->ALU.cl);
 	} while(st->ALU.cl.clk);
+
+	am2901_print_state(&st->dev.ALU0);
+	am2901_print_state(&st->dev.ALU1);
+
+	st->Bus.F= (st->ALU.Fhigh<<4) | (st->ALU.Flow<<0);
+	t->F= st->Bus.F;
+	t->Dint=st->Bus.Dint;
 }
 
 void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) {
@@ -344,7 +463,11 @@ void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) 
 	 */
 	t->S_Shift=(t->uIW.I876&0x2?4:0)|t->uIW.SHCS;
 
+	do_read_sources(cpu_st, t);
+
 	uIW_trace_run_ALUs(cpu_st, t);
+
+	do_write_dests(cpu_st, t);
 	
 }
 
@@ -385,8 +508,9 @@ void print_decoder_values(enum decoder_enum d, uint8_t v) {
 }
 
 void print_uIW_trace(uIW_trace_t *t) {
-	printf("Data: D/uADDR=%#05x (D_=%#04x)", t->uIW.D, (~t->uIW.D)&0xff);
+	printf("uCData: D/uADDR=%#05x (DATA_=%#04x)", t->uIW.uADDR, (~t->uIW.DATA_)&0xff);
 	printf(" Shifter: %s / Carry Select: %s (SHCS=%0x)\n",shifter_ops[t->S_Shift], carry_ops[t->S_Carry], t->uIW.SHCS);
+	printf("Internal Bus: %04x\n", t->Dint);
 	printf("ALUs: A=%01x B=%01x RS=%s %s -> %s\n",
 		t->uIW.A,
 		t->uIW.B,
@@ -394,6 +518,7 @@ void print_uIW_trace(uIW_trace_t *t) {
 		am2901_function_symbol[t->uIW.I543],
 		am2901_destination_mnemonics[t->uIW.I876]
 	);
+	printf("ALU Results: %#04x\n",t->F);
 	printf("Seqs: S0: %s, S1: %s, S2: %s\n",
 		am2909_ops[t->Seq0Op][3],
 		am2909_ops[t->Seq1Op][3],
@@ -425,8 +550,7 @@ int main(int argc, char **argv) {
 	char binstr[100];
 	cpu_state_t cpu_st;
 	uIW_trace_t trace[ROMSIZE];
-	if( (r=read_roms()) > 0 ) {
-		printf("read_roms returned: %i\n",r);
+	if( (r=read_roms()) == 0 ) {
 		merge_roms();
 
 		init_cpu_state(&cpu_st);
