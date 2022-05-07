@@ -6,6 +6,7 @@
 #include "../am2901.h"
 #include "../am2909.h"
 #include "../rom-common.h"
+#include "./bootstrap_rom.h"
 
 #define NUMROMS 7
 #define ROMSIZE 2048
@@ -303,6 +304,15 @@ void print_comments(word_t addr) {
 	}
 }
 
+byte_t sysbus_read_data(word_t address) {
+	// Bootstrap ROM
+	if(address >= 0xfc00 && address < 0xfe00) {
+		return(bootstrap_rom[address-0xfc00]);
+	}
+	return(0);
+}
+
+
 void parse_uIW(uIW_t *uIW, uint64_t in) {
 
 	uIW->S1S1_OVR_=BITRANGE(in,54,1); /* Override bit1=1 of S1S when LO, otherwise S1S=S2S */
@@ -347,7 +357,11 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 					st->Bus.iD= st->Reg.RF[(st->Reg.ILR<<4) | (st->Reg.RIR&0x0f)]; break;
 				case D_D2_READ_ADDR_BUS_MSB: break;
 				case D_D2_READ_ADDR_BUS_LSB: break;
-				case D_D3_READ_DATA_BUS: st->Bus.iD=st->Reg.DBRL; break;
+				case D_D3_READ_DATA_BUS:
+					//st->Bus.iD=st->Reg.DBRL;
+					st->Bus.iD=sysbus_read_data(st->Reg.ALO);
+					st->Bus.iD=0x01; // Force NOP
+					break;
 				case D_D3_READ_ILR: st->Bus.iD=st->Reg.ILR; break;
 				case D_D3_READ_DIPSW_NIB_HIGH: st->Bus.iD= (~st->IO.DIPSW>>4)&0x0f;
 				case D_D3_READ_uCDATA: st->Bus.iD= ~t->uIW.DATA_; break;
@@ -463,6 +477,7 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 	t->F= st->Bus.F;
 	t->iD=st->Bus.iD;
 }
+
 
 void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) {
 	t->uADDR=addr;
@@ -709,7 +724,7 @@ int main(int argc, char **argv) {
 		merge_roms();
 
 		init_cpu_state(&cpu_st);
-		uA=0; uAp=0;
+		uA=0x0; uAp=0;
 		for(int i=0; i<ROMSIZE; i++) {
 			//printf("\n%#06x: %#06x",i,allrom[0][i]);
 			//byte_bits_to_binary_string_grouped(binstr, allrom[0][i], NUMROMS*8, 1);
