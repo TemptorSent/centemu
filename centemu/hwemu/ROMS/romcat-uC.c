@@ -14,6 +14,9 @@
 #define BITRANGE(d,s,n) ((d>>s) & ((1LL<<(n))-1LL) )
 #define BITRANGE_R(d,s,n) (bitreverse_64(BITRANGE(d,s,n)) >>(64-n))
 
+typedef struct comment_t { word_t addr; char *comment; } comment_t;
+#include "comments_generated.h"
+
 static uint8_t allrom[NUMROMS][ROMSIZE];
 static uint8_t mergedrom[ROMSIZE][NUMROMS];
 static uint64_t iws[ROMSIZE];
@@ -87,8 +90,11 @@ typedef struct cpu_state_t {
 	} Seq;
 
 	struct Bus {
-		byte_t Dint;
+		word_t A;
+		byte_t iD;
+		byte_t xD;
 		byte_t F;
+		byte_t R;
 	} Bus;
 
 	struct Reg {
@@ -136,7 +142,7 @@ typedef struct uIW_trace_t {
 	sixbit_t D3_Out, E6_Out, K11_Out, H11_Out, E7_Out;
 	octal_t S_Shift;
 	twobit_t S_Carry;
-	byte_t Dint;
+	byte_t iD;
 	byte_t F;
 	
 } uIW_trace_t;
@@ -153,7 +159,7 @@ enum decoder_outputs {
 	D_E6_ALS_SRC_PC=0x2a, D_E6_ALS_SRC_DATA=0x2b, D_E6_WRITE_SEQ_AR=0x2c, D_E6_7=0x2e,
 
 	D_K11_0=0x30, D_K11_1=0x32, D_K11_2=0x34, D_K11_3=0x36,
-	D_K11_4=0x38, D_K11_5=0x3a, D_K11_6=0x3c, D_K11_WRITE_DATA_BUS=0x3e,
+	D_K11_4=0x38, D_K11_5=0x3a, D_K11_6=0x3c, D_K11_WRITE_EXT_DATA_BUS=0x3e,
 
 	D_H11_0=0x40, D_H11_1=0x42, D_H11_2=0x44, D_H11_WRITE_ALS_MSB=0x46,
 	D_H11_4=0x48, D_H11_5=0x4a, D_H11_READ_MAPROM=0x4c, D_H11_READ_ALU_RESULT=0x4d, D_H11_7=0x4e,
@@ -164,31 +170,31 @@ enum decoder_outputs {
 
 static char *decoded_sig[6][8][2] = {
 	{ // Decoder D2 -> latch UD4
-		{"READ DATA LATCH",""}, // C12p1
-		{"READ REGISTER",""}, // D13p1
-		{"READ ADDRESS BUS MSB",""}, // A6p7
-		{"READ ADDRESS BUS LSB",""}, // A4p7
+		{"READ DATA LATCH -> (iD-Bus)",""}, // C12p1
+		{"READ REGISTER -> (iD-Bus)",""}, // D13p1
+		{"READ ADDRESS BUS MSB (A-Bus) -> (iD-Bus)",""}, // A6p7
+		{"READ ADDRESS BUS LSB (A-Bus)-> (iD-Bus)",""}, // A4p7
 		{"",""},{"",""},
 		{"",""},{"",""}
 	},
 	{ // Decoder D3 -> latch UD5
-		{"D3.0 D5.0 A9p7 (Read AB PA11-PA13?)", ""}, // A9p7
-		{"D3.1 D5.1 M7p19 (Read dipsw low?)",""}, // M7p19
-		{"READ DATA BUS",""}, // A12p11
-		{"READ IL REGISTER",""}, // A8p7
-		{"READ DIP SWITCHES HIGH NIBBLE",""}, // M7p1
-		{"READ uC DATA CONSTANT",""}, // M6p18
+		{"D3.0 D5.0 A9p7 (Read AB PA11-PA13?) -> (iD-Bus)", ""}, // A9p7
+		{"D3.1 D5.1 M7p19 (Read dipsw low?) -> (iD-Bus)",""}, // M7p19
+		{"READ EXTERNAL DATA BUS (xD-Bus) -> (iD-Bus)",""}, // A12p11
+		{"READ IL REGISTER -> (iD-Bus)",""}, // A8p7
+		{"READ DIP SWITCHES HIGH NIBBLE (iD-Bus)",""}, // M7p1
+		{"READ uC DATA CONSTANT (uIW) -> (iD-Bus)",""}, // M6p18
 		{"",""},{"",""}
 
 	},
 	{ // Decoder E6 (from latch E5)
 		{"E6.0",""},
-		{"WRITE RESULT REGISTER",""},
-		{"WRITE REGISTER SELECT LATCH (RIR)",""},
+		{"WRITE RESULT REGISTER (R-Bus) <- (F-Bus)",""},
+		{"WRITE REGISTER INDEX SELECTION REGISTER <- (F-Bus)",""},
 		{"E6.3",""},
-		{"WRITE PAGETABLE BASE ADDRESS REGISTER",""},
-		{"STAGING ADDRESS LATCH SOURCE = CURRENT PC","STAGING ADDRESS LATCH SOURCE = DATA"},
-		{"WRITE DATA TO SEQUENCERS ADDRESS REGISTER",""},
+		{"WRITE PAGETABLE BASE ADDRESS REGISTER <- (F-Bus)",""},
+		{"STAGING ADDRESS LATCH SOURCE = CURRENT PC <- (A-Bus)","STAGING ADDRESS LATCH SOURCE = RESULT <- (R-Bus)"},
+		{"WRITE DATA TO SEQUENCERS ADDRESS REGISTER <- (F-Bus)",""},
 		{"E6.7",""}
 	},
 	{ // Decoder K11
@@ -196,19 +202,19 @@ static char *decoded_sig[6][8][2] = {
 		{"K11.1",""},
 		{"K11.2",""},
 		{"K11.3",""},
-		{"K11.4 (Write Register?)",""}, // Towards WRITE REGFILE K11.4 -> ?.H13Bp8 -> UD14.WE_/UD15.WE_
+		{"K11.4 (Write Register?) <- (R-Bus)",""}, // Towards WRITE REGFILE K11.4 -> ?.H13Bp8 -> UD14.WE_/UD15.WE_
 		{"K11.5",""},
 		{"K11.6",""},
-		{"WRITE DATA REGISTER",""}
+		{"WRITE EXTERNAL DATA BUS REGISTER <- (R-Bus)",""}
 	},
 	{ // Decoder H11
 		{"H11.0",""},
 		{"H11.1",""},
 		{"H11.2",""},
-		{"WRITE ADDRESS LATCH MSB",""},
+		{"WRITE STAGING ADDRESS LATCH MSB <- (A-Bus/R-Bus)",""},
 		{"H11.4",""},
 		{"H11.5",""},
-		{"READ MAPPING PROM","READ ALU RESULT"},
+		{"READ MAPPING PROM -> (F-Bus)","READ ALU RESULT -> (F-Bus)"},
 		{"H11.7",""}
 	},
 	{ // Decoder E7
@@ -289,7 +295,13 @@ int merge_roms() {
 	return(ROMSIZE);
 }
 
-
+void print_comments(word_t addr) {
+	comment_t *cmt=comments;
+	while(cmt->comment) {
+		if(cmt->addr == addr) { printf("// %s\n",cmt->comment);}
+		cmt++;
+	}
+}
 
 void parse_uIW(uIW_t *uIW, uint64_t in) {
 
@@ -330,16 +342,16 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 		for(int j=0; j<8; j++) {
 			e= (i<<4) | (j<<1) | ( (v&(1<<j))? 1:0);
 			switch(e) {
-				case D_D2_READ_DL: st->Bus.Dint= st->Reg.DL;
+				case D_D2_READ_DL: st->Bus.iD= st->Reg.DL;
 				case D_D2_READ_REG: // This needs an enable to toggle between IL and RIR for high nibble
-					st->Bus.Dint= st->Reg.RF[(st->Reg.ILR<<4) | (st->Reg.RIR&0x0f)]; break;
+					st->Bus.iD= st->Reg.RF[(st->Reg.ILR<<4) | (st->Reg.RIR&0x0f)]; break;
 				case D_D2_READ_ADDR_BUS_MSB: break;
 				case D_D2_READ_ADDR_BUS_LSB: break;
-				case D_D3_READ_DATA_BUS: st->Bus.Dint=st->Reg.DBRL; break;
-				case D_D3_READ_ILR: st->Bus.Dint=st->Reg.ILR; break;
-				case D_D3_READ_DIPSW_NIB_HIGH: st->Bus.Dint= (~st->IO.DIPSW>>4)&0x0f;
-				case D_D3_READ_uCDATA: st->Bus.Dint= ~t->uIW.DATA_; break;
-				case D_H11_READ_MAPROM: st->Bus.F= maprom[st->Bus.Dint]; st->ALU.OE_=1; break; 
+				case D_D3_READ_DATA_BUS: st->Bus.iD=st->Reg.DBRL; break;
+				case D_D3_READ_ILR: st->Bus.iD=st->Reg.ILR; break;
+				case D_D3_READ_DIPSW_NIB_HIGH: st->Bus.iD= (~st->IO.DIPSW>>4)&0x0f;
+				case D_D3_READ_uCDATA: st->Bus.iD= ~t->uIW.DATA_; break;
+				case D_H11_READ_MAPROM: st->Bus.F= maprom[st->Bus.iD]; st->ALU.OE_=1; break; 
 				case D_H11_READ_ALU_RESULT:
 					st->Bus.F= st->ALU.OE_=0;
 					st->Bus.F= (((st->ALU.Fhigh&0x0f)<<4)&0xf0) | ((st->ALU.Flow<<0)&0x0f);
@@ -371,13 +383,13 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 		for(int j=0; j<8; j++) {
 			e= (i<<4) | (j<<1) | ( (v&(1<<j))? 1:0);
 			switch(e) {
-				case D_E6_WRITE_RR: st->Reg.RR=st->Bus.Dint; break;
-				case D_E6_WRITE_RIR: st->Reg.RIR=st->Bus.Dint; break;
-				case D_E6_WRITE_PTBAR: st->Reg.PTBAR=st->Bus.Dint; break;
+				case D_E6_WRITE_RR: st->Reg.RR=st->Bus.F; break;
+				case D_E6_WRITE_RIR: st->Reg.RIR=st->Bus.F; break;
+				case D_E6_WRITE_PTBAR: st->Reg.PTBAR=st->Bus.F; break;
 				case D_E6_WRITE_SEQ_AR: st->Seq.RE_=0; break;
-				case D_K11_WRITE_DATA_BUS: st->Reg.DBRL=st->Bus.Dint; break;
-				case D_H11_WRITE_ALS_MSB: st->Reg.ALS= (st->Reg.ALS&0xff00) | (st->Bus.Dint<<8); break;
-				case D_E7_WRITE_SR: st->Reg.SR= st->Bus.Dint; break;
+				case D_K11_WRITE_EXT_DATA_BUS: st->Reg.DBRL=st->Bus.R; break;
+				case D_H11_WRITE_ALS_MSB: st->Reg.ALS= (st->Reg.ALS&0xff00) | (st->Bus.iD<<8); break;
+				case D_E7_WRITE_SR: st->Reg.SR= st->Bus.iD; break;
 
 				default: break;
 
@@ -425,8 +437,8 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 	st->ALU.I210= ((octal_t)t->uIW.I210)&0x7;
 	st->ALU.ADDR_A= t->uIW.A&0xf;
 	st->ALU.ADDR_B= t->uIW.B&0xf;
-	st->ALU.Dlow=  (st->Bus.Dint&0x0f)>>0;
-	st->ALU.Dhigh= (st->Bus.Dint&0xf0)>>4;
+	st->ALU.Dlow=  (st->Bus.iD&0x0f)>>0;
+	st->ALU.Dhigh= (st->Bus.iD&0xf0)>>4;
 	st->ALU.Cin= (t->S_Carry==3?0:t->S_Carry==2?st->ALU.Cout:t->S_Carry?1:0);
 
 	if(t->S_Shift&0x4) {
@@ -449,7 +461,7 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 
 	if(!st->ALU.OE_) { st->Bus.F= (((st->ALU.Fhigh&0x0f)<<4)&0xf0) | ((st->ALU.Flow<<0)&0x0f); }
 	t->F= st->Bus.F;
-	t->Dint=st->Bus.Dint;
+	t->iD=st->Bus.iD;
 }
 
 void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) {
@@ -644,10 +656,11 @@ void print_decoder_values(enum decoder_enum d, uint8_t v) {
 }
 
 void print_uIW_trace(uIW_trace_t *t) {
+	print_comments(t->uADDR);
 	printf("Current Address: 0x%03x  Previous Address: 0x%03x  Next Address: 0x%03x\n", t->uADDR, t->uADDR_Prev, t->uADDR_Next);
 	printf("uCData: D/uADDR=0x%03x (DATA_=0x%02x)", t->uIW.uADDR, (~t->uIW.DATA_)&0xff);
 	printf(" Shifter: %s / Carry Select: %s (SHCS=%0x)\n",shifter_ops[t->S_Shift], carry_ops[t->S_Carry], t->uIW.SHCS);
-	printf("Internal Bus: 0x%02x\n", t->Dint);
+	printf("iD-Bus: 0x%02x\n", t->iD);
 	printf("ALUs: A=0x%01x B=0x%01x RS=%s %s -> %s\n",
 		t->uIW.A,
 		t->uIW.B,
@@ -680,7 +693,7 @@ void init_cpu_state(cpu_state_t *st) {
 	init_Seqs(st);
 	clock_init(&st->ALU.cl,"ALU Clock", CLK_LO);
 	init_ALUs(st);
-	st->Bus.Dint=0;
+	st->Bus.iD=0;
 	st->Bus.F=0;
 }
 
@@ -712,19 +725,6 @@ int main(int argc, char **argv) {
 			uAp=uA;
 			uA=trace[i].uADDR_Next;
 			//uA=i;
-		/*	
-			printf(" 2901:");
-			printf(" I=%03o",BITRANGE(iws[i],34,9));
-			printf(" A=%01x",BITRANGE(iws[i],47,4));
-			printf(" B=%01x",BITRANGE(iws[i],43,4));
-			printf(" 2909:");
-			printf(" PUP/FE=%01o",BITRANGE(iws[i],27,2));
-			printf(" S0S=%01o",BITRANGE(iws[i],29,2));
-			printf(" (S1S=%01o)",BITRANGE(iws[i],31,2)|(BITRANGE(iws[i],54,1)?2:0));
-			printf(" S2S=%01o",BITRANGE(iws[i],31,2));
-			printf(" D=%03x",BITRANGE(iws[i],16,11));
-			printf("\n");
-		*/
 		}
 	} else {
 		printf("Could not read ROMS!");
