@@ -76,18 +76,18 @@ char *am2901_destination_decode(am2901_device_t *dev) {
 }
 
 char *am2901_function_decode(am2901_device_t *dev) {
-	octal_t I543=*(dev->I543);
-	nibble_t R=am2901_read_Rmux(dev);
-	nibble_t S=am2901_read_Smux(dev);
+	octal_t I543=*(dev->I543)&0x7;
+	nibble_t R=am2901_read_Rmux(dev)&0xf;
+	nibble_t S=am2901_read_Smux(dev)&0xf;
 
 	nibble_t F;
 	bit_t P,P_,P3,P2,P1,P0,Pall,G,G_,G3,G2,G1,G0,Gany,Cn,Co,C4,C3,OVR;
-	Cn=*(dev->Cn);
+	Cn=*(dev->Cn)&0x1;
 
 	/* Complement R or S before calculating P and G as required */
 	switch(I543) {
-		case SUBR: case NOTRS: case EXOR: R = ~R; break;
-		case SUBS: S = ~S;
+		case SUBR: case NOTRS: case EXOR: R = ~R&0xf; break;
+		case SUBS: S = ~S&0xf;
 	}
 
 	P=(R|S)&0xf;
@@ -135,7 +135,7 @@ char *am2901_function_decode(am2901_device_t *dev) {
 			break;
 		case EXOR:
 		case EXNOR:
-			F=( ( R & S ) | ( ~R & ~S ) ) & 0xf;
+			F=( ( R & S ) | ( (~R&0xf) & (~S&0xf) ) ) & 0xf;
 			P_=Gany;
 			G_= G3 | (P3&G2) | (P3&P2&G1) | Pall;
 			Co= ~( G_ & ( G0 | (~Cn&0x1) ) ) & 0x1;
@@ -355,12 +355,12 @@ void am2901_print_state(am2901_device_t *dev) {
 
 	printf(" Y=[%c]%0x", dev->Ymux,*(dev->Y));
 	printf(" Flags: [%c%c%c%c]", *(dev->Co)?'C':' ',*(dev->OVR)?'V':' ',*(dev->F3)?'N':' ',*(dev->FZ)?'Z':' ');
-	printf(" ADDR_A=%0x, ADDR_B=%0x\n",*(dev->ADDR_A), *(dev->ADDR_B));
+	printf("\nADDR_A=%0x, ADDR_B=%0x ",*(dev->ADDR_A), *(dev->ADDR_B));
 	if(dev->RAM_EN) {
 		printf("RAM[%0x]=%0x%s",*(dev->ADDR_B), dev->F, dev->RAMmux=='D'?"/2":dev->RAMmux=='U'?"*2":"");
-		if(dev->RAM0_DIR == 'Z') { printf("RAM0=HiZ"); }
+		if(dev->RAM0_DIR == 'Z') { printf(" RAM0=HiZ"); }
 		else { printf(" RAM0=%0x(%c)", *(dev->RAM0), dev->RAM0_DIR ); }
-		if(dev->RAM3_DIR == 'Z') { printf("RAM3=HiZ"); }
+		if(dev->RAM3_DIR == 'Z') { printf(" RAM3=HiZ"); }
 		else { printf(" RAM3=%0x(%c)", *(dev->RAM3), dev->RAM3_DIR ); }
 	} else { printf("RAM: N/C"); }
 	if(dev->Q_EN) {
@@ -440,6 +440,15 @@ int am2901_init(am2901_device_t *dev, char* id,
 	defS_(F3);
 	defS_(Y);
 	defS_(OE_);
+
+	/* Clear internal state */
+	I_(Q)=0;
+	I_(F)=0;
+	I_(A)=0;
+	I_(B)=0;
+	for(int r=0; r<16; r++) {
+		dev->RAM[r]=0;
+	}
 	return(0);
 }
 

@@ -10,7 +10,7 @@ char *am2909_clock_edge_LH(am2909_device_t *dev) {
 	if( !S_(RE_) ){ I_(AR)=oS_(Ri,S_(Di)); deroach("Seq Latching AR=%0x\n",I_(AR)); }
 
 	/* Select source to temp output O */
-	switch(S_(S)) {
+	switch((enum am2909_source_code) S_(S)) {
 		case uPC: O=I_(uPC); deroach("Seq S:uPC=%0x\n",O); break;
 		case AR: O=I_(AR); deroach("Seq S:AR=%0x\n",O); break;
 		case STK0: O=dev->STK[I_(SP)]; deroach("Seq S:STK[%0x]=%0x\n",I_(SP),O); break;
@@ -61,7 +61,7 @@ int am2909_init(am2909_device_t *dev, char* id,
 	nibble_t *ORi, bit_t *ZERO_, bit_t *OE_, /* Outputs overrides: OE_=1->HiZ, ZERO_=0->Y=0, ORi=1->Yi=1 */
 	nibble_t *Y /* Outputs Yi of Y if not overridden by above */) {
 	dev->clk=clk;
-	dev->S=(enum am2909_source_code *)S;
+	dev->S=S;
 	dev->FE_=FE_;
 	dev->PUP=PUP;
 	dev->Cn=Cn;
@@ -74,6 +74,12 @@ int am2909_init(am2909_device_t *dev, char* id,
 	dev->ZERO_=ZERO_;
 	dev->OE_=OE_;
 	dev->Y=Y;
+
+	// Initialize internal state to 0
+	dev->uPC=0;
+	dev->AR=0;
+	dev->SP=0;
+	for(int i=0; i<4; i++) { dev->STK[i]=0;}
 	return(0);
 }
 typedef am2909_device_t am2911_device_t;

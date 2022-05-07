@@ -73,7 +73,17 @@ typedef struct cpu_state_t {
 	} ALU;
 
 	struct Seq {
-		bit_t RE_; // Seq AR input enable 
+		clockline_t cl; // Clockline
+		nibble_t DiS0, DiS1; octal_t DiS2; // uADDR input, split
+		nibble_t RiS0, RiS1; // Ri inputs from F-bus
+		twobit_t S0S, S1S, S2S; // Sequencer Source Selects
+		bit_t FE_, PUP; // Shift controls, File Enable (Active LO), and Push/Pop
+		bit_t Cn, C4, C8, Co; // Carry-in input, Intermediate carries C4,C8, Carry Output
+		bit_t RE_; // Seq AR input enable
+		nibble_t ORiS0, ORiS1; // ORi inputs for S0,S1
+		bit_t ZERO_; // Zero ouputs when LO
+		nibble_t YS0, YS1, YS2; // Outputs
+		bit_t OE_; // Enable outputs when LO, HiZ when HI
 	} Seq;
 
 	struct Bus {
@@ -84,7 +94,9 @@ typedef struct cpu_state_t {
 	struct Reg {
 		byte_t RIR; // Register Index Register
 		nibble_t ILR; // Interrupt Level Register
-		byte_t DR; // Data Register
+		byte_t DBOR; // Databus Output Register
+		byte_t DBRL; // Databus Receive Latch
+		byte_t DL; // Data Latch
 		byte_t SR; // Status Register
 		byte_t RR; // Result Register
 		word_t ALS; // Address Latch, Staging
@@ -92,6 +104,10 @@ typedef struct cpu_state_t {
 		byte_t PTBAR; // Page Table Base Address Register
 		byte_t RF[0x100]; // Register File (ABXYZSCPx2x16)
 	} Reg;
+
+	struct IO {
+		byte_t DIPSW;
+	} IO;
 } cpu_state_t;
 
 
@@ -126,14 +142,16 @@ typedef struct uIW_trace_t {
 
 enum decoder_enum { D_D2, D_D3, D_E6, D_K11, D_H11, D_E7 };
 enum decoder_outputs {
-	D_D2_0_D44=0x00, D_D2_READ_REG=0x02, D_D2_READ_ADDR_MSB=0x04, D_D2_3_D4_3=0x06,
+	D_D2_READ_DL=0x00, D_D2_READ_REG=0x02, D_D2_READ_ADDR_BUS_MSB=0x04, D_D2_READ_ADDR_BUS_LSB=0x06,
 
-	D_D3_0_D5_0=0x10, D_D3_1_D5_1=0x12, D_D3_3_D5_5=0x14, D_D3_READ_ILR=0x16, D_D3_4_D5_2=0x18, D_D3_READ_uCDATA=0x1a,
+	D_D3_0_D5_0=0x10, D_D3_1_D5_1=0x12, D_D3_READ_DATA_BUS=0x14, D_D3_READ_ILR=0x16,
+	D_D3_READ_DIPSW_NIB_HIGH=0x18, D_D3_READ_uCDATA=0x1a,
 
 	D_E6_0=0x20, D_E6_WRITE_RR=0x22, D_E6_WRITE_RIR=0x26, D_E6_3, D_E6_WRITE_PTBAR=0x28,
 	D_E6_ALS_SRC_PC=0x2a, D_E6_ALS_SRC_DATA=0x2b, D_E6_WRITE_SEQ_AR=0x2c, D_E6_7=0x2e,
 
-	D_K11_0=0x30, D_K11_1=0x32, D_K11_2=0x34, D_K11_3=0x36, D_K11_4=0x38, D_K11_5=0x3a, D_K11_6=0x3c, D_K11_WRITE_DR=0x3e,
+	D_K11_0=0x30, D_K11_1=0x32, D_K11_2=0x34, D_K11_3=0x36,
+	D_K11_4=0x38, D_K11_5=0x3a, D_K11_6=0x3c, D_K11_WRITE_DATA_BUS=0x3e,
 
 	D_H11_0=0x40, D_H11_1=0x42, D_H11_2=0x44, D_H11_WRITE_ALS_MSB=0x46,
 	D_H11_4=0x48, D_H11_5=0x4a, D_H11_READ_MAPROM=0x4c, D_H11_7=0x4e,
@@ -144,20 +162,20 @@ enum decoder_outputs {
 
 static char *decoded_sig[6][8][2] = {
 	{ // Decoder D2 -> latch UD4
-		{"D2.0 D4.4",""},
-		{"READ REGISTER",""},
-		{"READ ADDRESS MSB",""},
-		{"D2.3 D4.3",""},
+		{"READ DATA LATCH",""}, // C12p1
+		{"READ REGISTER",""}, // D13p1
+		{"READ ADDRESS BUS MSB",""}, // A6p7
+		{"READ ADDRESS BUS LSB",""}, // A4p7
 		{"",""},{"",""},
 		{"",""},{"",""}
 	},
 	{ // Decoder D3 -> latch UD5
-		{"D3.0 D5.0", ""},
-		{"D3.1 D5.1",""},
-		{"D3.2 D5.5",""},
-		{"READ IL REGISTER",""},
-		{"D3.4 D5.2",""},
-		{"READ uC DATA CONSTANT",""},
+		{"D3.0 D5.0 A9p7 (Read AB PA11-PA13?)", ""}, // A9p7
+		{"D3.1 D5.1 M7p19 (Read dipsw low?)",""}, // M7p19
+		{"READ DATA BUS",""}, // A12p11
+		{"READ IL REGISTER",""}, // A8p7
+		{"READ DIP SWITCHES HIGH NIBBLE",""}, // M7p1
+		{"READ uC DATA CONSTANT",""}, // M6p18
 		{"",""},{"",""}
 
 	},
@@ -310,10 +328,14 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 		for(int j=0; j<8; j++) {
 			e= (i<<4) | (j<<1) | ( (v&(1<<j))? 1:0);
 			switch(e) {
+				case D_D2_READ_DL: st->Bus.Dint= st->Reg.DL;
 				case D_D2_READ_REG: // This needs an enable to toggle between IL and RIR for high nibble
 					st->Bus.Dint= st->Reg.RF[(st->Reg.ILR<<4) | (st->Reg.RIR&0x0f)]; break;
-				case D_D2_READ_ADDR_MSB: break;
+				case D_D2_READ_ADDR_BUS_MSB: break;
+				case D_D2_READ_ADDR_BUS_LSB: break;
+				case D_D3_READ_DATA_BUS: st->Bus.Dint=st->Reg.DBRL; break;
 				case D_D3_READ_ILR: st->Bus.Dint=st->Reg.ILR; break;
+				case D_D3_READ_DIPSW_NIB_HIGH: st->Bus.Dint= (~st->IO.DIPSW>>4)&0x0f;
 				case D_D3_READ_uCDATA: st->Bus.Dint= ~t->uIW.DATA_; break;
 				case D_H11_READ_MAPROM: st->Bus.F= maprom[st->Bus.Dint]; break; 
 				default: break;
@@ -347,7 +369,7 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 				case D_E6_WRITE_RIR: st->Reg.RIR=st->Bus.Dint; break;
 				case D_E6_WRITE_PTBAR: st->Reg.PTBAR=st->Bus.Dint; break;
 				case D_E6_WRITE_SEQ_AR: st->Seq.RE_=0; break;
-				case D_K11_WRITE_DR: st->Reg.DR=st->Bus.Dint; break;
+				case D_K11_WRITE_DATA_BUS: st->Reg.DBRL=st->Bus.Dint; break;
 				case D_H11_WRITE_ALS_MSB: st->Reg.ALS= (st->Reg.ALS&0xff00) | (st->Bus.Dint<<8); break;
 				case D_E7_WRITE_SR: st->Reg.SR= st->Bus.Dint; break;
 
@@ -358,12 +380,44 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 	}
 }
 
+void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
+	st->Seq.Cn=1; // Always increment (unless we find logic to disable)
+
+	st->Seq.S0S= (t->uIW.S0S)&0x3;
+	st->Seq.S1S= (t->uIW.S2S)&0x3;
+	st->Seq.S2S= (t->uIW.S1S)&0x3;
+
+	st->Seq.FE_= t->uIW.FE_&0x1;
+	st->Seq.PUP= t->uIW.PUP&0x1;
+
+	st->Seq.DiS0= (t->uIW.uADDR&0x00f)>>0;
+	st->Seq.DiS1= (t->uIW.uADDR&0x0f0)>>4;
+	st->Seq.DiS2= (t->uIW.uADDR&0x700)>>8;
+	
+	st->Seq.RiS0= (st->Bus.F&0x0f)>>0;
+	st->Seq.RiS1= (st->Bus.F&0xf0)>>4;
+
+	// Force for now until we find logic connectoins for these
+	st->Seq.OE_= 0;
+	st->Seq.ZERO_= 1;
+
+	st->Seq.cl.clk=CLK_LO;
+	do{
+		am2909_update(&st->dev.Seq0);
+		am2909_update(&st->dev.Seq1);
+		am2911_update(&st->dev.Seq2);
+		clock_advance(&st->Seq.cl);
+	} while(st->Seq.cl.clk);
+
+}
+
 void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
-	st->ALU.I876= t->uIW.I876;
-	st->ALU.I543= t->uIW.I543;
-	st->ALU.I210= t->uIW.I210;
-	st->ALU.ADDR_A= t->uIW.A;
-	st->ALU.ADDR_B= t->uIW.B;
+	st->ALU.FZ=1; // Pull FZ high at beginning of cycle, OC outputs will pull low if not zero
+	st->ALU.I876= ((octal_t)t->uIW.I876)&0x7;
+	st->ALU.I543= ((octal_t)t->uIW.I543)&0x7;
+	st->ALU.I210= ((octal_t)t->uIW.I210)&0x7;
+	st->ALU.ADDR_A= t->uIW.A&0xf;
+	st->ALU.ADDR_B= t->uIW.B&0xf;
 	st->ALU.Dlow=  (st->Bus.Dint&0x0f)>>0;
 	st->ALU.Dhigh= (st->Bus.Dint&0xf0)>>4;
 	st->ALU.Cin= (t->S_Carry==3?0:t->S_Carry==2?st->ALU.Cout:t->S_Carry?1:0);
@@ -377,6 +431,7 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 	}
 
 	st->ALU.cl.clk=CLK_LO;
+	st->ALU.OE_=0;
 	do{
 		am2901_update(&st->dev.ALU0);
 		am2901_update(&st->dev.ALU1);
@@ -386,7 +441,7 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 	am2901_print_state(&st->dev.ALU0);
 	am2901_print_state(&st->dev.ALU1);
 
-	st->Bus.F= (st->ALU.Fhigh<<4) | (st->ALU.Flow<<0);
+	st->Bus.F= (((st->ALU.Fhigh&0x0f)<<4)&0xf0) | ((st->ALU.Flow<<0)&0x0f);
 	t->F= st->Bus.F;
 	t->Dint=st->Bus.Dint;
 }
@@ -469,9 +524,47 @@ void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) 
 
 	do_write_dests(cpu_st, t);
 	
+	uIW_trace_run_Seqs(cpu_st, t);
+	
 }
 
 void init_ALUs(cpu_state_t *st) {
+	st->ALU.I876=0;
+	st->ALU.I543=0;
+	st->ALU.I210=0;
+	st->ALU.ADDR_A=0;
+	st->ALU.ADDR_B=0;
+	st->ALU.Dlow=0;
+	st->ALU.Dhigh=0;
+
+	st->ALU.Cin=0;
+	st->ALU.Chalf=0;
+	st->ALU.Cout=0;
+
+	st->ALU.Q0=0;
+	st->ALU.Q3=0;
+	st->ALU.RAM0Q7=0;
+	st->ALU.RAM3=0;
+	st->ALU.RAM7=0;
+
+
+	st->ALU.P_0=0;
+	st->ALU.G_0=0;
+	st->ALU.P_1=0;
+	st->ALU.G_1=0;
+
+
+	st->ALU.FZ=1;
+	st->ALU.F3=0;
+	st->ALU.F7=0;
+	st->ALU.nibbleOVF=0;
+	st->ALU.OVF=0;
+
+	st->ALU.Flow=0;
+	st->ALU.Fhigh=0;
+
+	st->ALU.OE_=1;
+
 	am2901_init(&st->dev.ALU0, "ALU0", &st->ALU.cl.clk,
 		&st->ALU.I210, &st->ALU.I543, &st->ALU.I876,
 		&st->ALU.RAM0Q7, &st->ALU.RAM3,
@@ -495,7 +588,43 @@ void init_ALUs(cpu_state_t *st) {
 		&st->ALU.Fhigh, &st->ALU.OE_);
 }
 
+void init_Seqs(cpu_state_t *st) {
+	// Clear initial values
+	st->Seq.ORiS0=0; st->Seq.ORiS1=0;
+	st->Seq.DiS0=0; st->Seq.DiS1=0; st->Seq.DiS2=0;
+	st->Seq.RiS0=0; st->Seq.RiS1=0;
+	st->Seq.YS0=0; st->Seq.YS1=0; st->Seq.YS2=0;
+	st->Seq.S0S=0; st->Seq.S1S=0; st->Seq.S2S=0;
 
+	am2909_init(&st->dev.Seq0, "Seq0",
+		&st->Seq.cl.clk, /* Clock state from clockline */
+		&st->Seq.S0S, &st->Seq.FE_, &st->Seq.PUP, /* Select operation */
+		&st->Seq.DiS0, /* Direct inputs */
+		&st->Seq.RiS0, &st->Seq.RE_, /* AR inputs (tied to Di on am2911) (when RE_ is LO) inputs */
+		&st->Seq.Cn, &st->Seq.C4, /* Incrementer carry in and carry out, Cn=1 increments uPC, Cn=0 repeats current op */
+		&st->Seq.ORiS0, &st->Seq.ZERO_, &st->Seq.OE_, /* Outputs overrides: OE_=1->HiZ, ZERO_=0->Y=0, ORi=1->Yi=1 */
+		&st->Seq.YS0 /* Outputs Yi of Y if not overridden by above */
+	);
+
+	am2909_init(&st->dev.Seq1, "Seq1",
+		&st->Seq.cl.clk, /* Clock state from clockline */
+		&st->Seq.S1S, &st->Seq.FE_, &st->Seq.PUP, /* Select operation */
+		&st->Seq.DiS1, /* Direct inputs */
+		&st->Seq.RiS1, &st->Seq.RE_, /* AR inputs (tied to Di on am2911) (when RE_ is LO) inputs */
+		&st->Seq.C4, &st->Seq.C8, /* Incrementer carry in and carry out, Cn=1 increments uPC, Cn=0 repeats current op */
+		&st->Seq.ORiS1, &st->Seq.ZERO_, &st->Seq.OE_, /* Outputs overrides: OE_=1->HiZ, ZERO_=0->Y=0, ORi=1->Yi=1 */
+		&st->Seq.YS1 /* Outputs Yi of Y if not overridden by above */
+	);
+
+	am2911_init( &st->dev.Seq2, "Seq2",
+		&st->Seq.cl.clk, /* Clock state from clockline */
+		&st->Seq.S2S, &st->Seq.FE_, &st->Seq.PUP, /* Select operation */
+		&st->Seq.DiS2, &st->Seq.RE_, /* Di/AR inputs (Load AR when RE_ is LO) */
+		&st->Seq.C8, &st->Seq.Co, /* Incrementer carry in and carry out, Cn=1 increments uPC, Cn=0 repeats current op */
+		&st->Seq.ZERO_, &st->Seq.OE_, /* Outputs overrides: OE_=1->HiZ, ZERO_=0->Y=0 */
+		&st->Seq.YS2 /* Outputs Yi of Y if not overridden by above */
+	);
+}
 
 void print_decoder_values(enum decoder_enum d, uint8_t v) {
 	octal_t p;
@@ -539,8 +668,12 @@ void print_uIW_trace(uIW_trace_t *t) {
 }
 
 void init_cpu_state(cpu_state_t *st) {
+	clock_init(&st->Seq.cl,"Seq Clock", CLK_LO);
+	init_Seqs(st);
 	clock_init(&st->ALU.cl,"ALU Clock", CLK_LO);
 	init_ALUs(st);
+	st->Bus.Dint=0;
+	st->Bus.F=0;
 }
 
 int main(int argc, char **argv) {
