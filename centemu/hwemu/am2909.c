@@ -17,15 +17,6 @@ char *am2909_clock_edge_LH(am2909_device_t *dev) {
 		case Di: O=S_(Di); deroach("Seq S:Di=%0x\n",O); break;
 	}
 
-	/* Apply ZERO_ and ORi to O */
-	O=(S_(ZERO_)?O|oS_(ORi,0):0);
-	deroach("Seq O=%x%s",O, S_(ZERO_)?"":" (ZERO_)");
-	if(oS_(ORi,0)){ deroach(" ORi=%0x",oS_(ORi,0)); }
-
-	/* Increment our uPC based on Cn and set Co if needed */
-	I_(uPC)=(O+S_(Cn))&0xf;
-	S_(Co)=(S_(Cn)&&O==0xf)?1:0;
-	deroach("  uPC=%0x (Cin=%0x,Cout=%0x)",I_(uPC),S_(Cn),S_(Co));
 
 	/* Push/Pop as indicated by FE_ and PUP */
 	if(!S_(FE_)) {
@@ -43,6 +34,16 @@ char *am2909_clock_edge_LH(am2909_device_t *dev) {
 	printf("\nSP=%0x ",I_(SP));
 	for(int i=0; i<4; i++) { printf("STK[%0x]=0x%02x ",i,dev->STK[i]); }
 	printf("\n");
+
+	/* Apply ZERO_ and ORi to O */
+	O=(S_(ZERO_)?O|oS_(ORi,0):0);
+	deroach("Seq O=%x%s",O, S_(ZERO_)?"":" (ZERO_)");
+	if(oS_(ORi,0)){ deroach(" ORi=%0x",oS_(ORi,0)); }
+
+	/* Increment our uPC based on Cn and set Co if needed */
+	I_(uPC)=(O+S_(Cn))&0xf;
+	S_(Co)=(S_(Cn)&&O==0xf)?1:0;
+	deroach("  uPC=%0x (Cin=%0x,Cout=%0x)",I_(uPC),S_(Cn),S_(Co));
 
 	/* Set output values Y if OE_ is LOW (HiZ=1) */
 	TRI_OUTPUT(S_(Y),!S_(OE_),O);
