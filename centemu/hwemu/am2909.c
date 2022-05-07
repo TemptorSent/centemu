@@ -27,19 +27,22 @@ char *am2909_clock_edge_LH(am2909_device_t *dev) {
 	S_(Co)=(S_(Cn)&&O==0xf)?1:0;
 	deroach("  uPC=%0x (Cin=%0x,Cout=%0x)",I_(uPC),S_(Cn),S_(Co));
 
-
 	/* Push/Pop as indicated by FE_ and PUP */
 	if(!S_(FE_)) {
 		SP=I_(SP);
 		if(S_(PUP)) {
 			I_(SP)=(SP+1)&0x3;
-			dev->STK[I_(SP)]=uPC;
+			dev->STK[I_(SP)]=I_(uPC);
 			deroach("SP++");
 		} else {
 			I_(SP)=SP?SP-1:0x3;
 			deroach("SP--");
 		}
 	} else { deroach("HOLD SP"); }
+	
+	printf("\nSP=%0x ",I_(SP));
+	for(int i=0; i<4; i++) { printf("STK[%0x]=0x%02x ",i,dev->STK[i]); }
+	printf("\n");
 
 	/* Set output values Y if OE_ is LOW (HiZ=1) */
 	TRI_OUTPUT(S_(Y),!S_(OE_),O);
