@@ -86,8 +86,8 @@ char *am2901_function_decode(am2901_device_t *dev) {
 
 	/* Complement R or S before calculating P and G as required */
 	switch(I543) {
-		case SUBR: case NOTRS: case EXOR: R = ~R&0xf; break;
-		case SUBS: S = ~S&0xf;
+		case SUBR: case NOTRS: case EXOR: R = (~R)&0xf; break;
+		case SUBS: S = (~S)&0xf;
 	}
 
 	P=(R|S)&0xf;
@@ -113,8 +113,8 @@ char *am2901_function_decode(am2901_device_t *dev) {
 		case SUBR:
 		case SUBS:
 			F=( R + S + Cn ) & 0xf;
-			P_=~Pall & 0x1;
-			G_=~((G3)|(P3&G2)|(P3&P2&G1)|(P3&P2&P1&G0)) & 0x1;
+			P_=(~Pall) & 0x1;
+			G_=(~((G3)|(P3&G2)|(P3&P2&G1)|(P3&P2&P1&G0))) & 0x1;
 			Co=C4;
 			OVR=C3^C4;
 			break;
@@ -122,23 +122,23 @@ char *am2901_function_decode(am2901_device_t *dev) {
 			F=( R | S ) & 0xf;
 			P_=0;
 			G_=Pall;
-			Co=( ~Pall | Cn) & 0x1;
+			Co=( (~Pall) | Cn) & 0x1;
 			OVR=Co;
 			break;
 		case AND:
 		case NOTRS:
 			F=( R & S ) & 0xf;
 			P_=0;
-			G_= ~Gany & 0x1;
+			G_= (~Gany) & 0x1;
 			Co= Gany | Cn;
 			OVR=Co;
 			break;
 		case EXOR:
 		case EXNOR:
-			F=( ( R & S ) | ( (~R&0xf) & (~S&0xf) ) ) & 0xf;
+			F=( ( R & S ) | ( ((~R)&0xf) & ((~S)&0xf) ) ) & 0xf;
 			P_=Gany;
 			G_= G3 | (P3&G2) | (P3&P2&G1) | Pall;
-			Co= ~( G_ & ( G0 | (~Cn&0x1) ) ) & 0x1;
+			Co= (~( G_ & ( G0 | (~Cn&0x1) ) )) & 0x1;
 			OVR=( ( ~P2 | (~G2&~P1) | (~G2&~G1&~P0) | (~G2&~G1&~G0&Cn) )
 			    ^ ( ~P3 | (~G3&~P2) | (~G3&~G2&~P1) | (~G3&~G2&~G1&~P0) | (~G3&~G2&~G1&~G0&Cn) )
 			    ) & 0x1;

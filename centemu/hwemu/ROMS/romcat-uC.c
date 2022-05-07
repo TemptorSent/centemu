@@ -449,12 +449,12 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 		st->ALU.RAM7=st->Shifter.DownLine;
 	}
 
-	st->ALU.cl.clk=CLK_LO;
+	st->ALU.cl.clk=CLK_HI;
 	do{
 		am2901_update(&st->dev.ALU0);
 		am2901_update(&st->dev.ALU1);
 		clock_advance(&st->ALU.cl);
-	} while(st->ALU.cl.clk);
+	} while(st->ALU.cl.clk!=CLK_HI);
 
 	am2901_print_state(&st->dev.ALU0);
 	am2901_print_state(&st->dev.ALU1);
