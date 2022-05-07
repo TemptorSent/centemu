@@ -127,7 +127,9 @@ typedef struct uIW_t {
 
 
 typedef struct uIW_trace_t {
-	uint16_t addr;
+	word_t uADDR_Prev;
+	word_t uADDR;
+	word_t uADDR_Next;
 	uIW_t uIW;
 	nibble_t Seq0Op, Seq1Op, Seq2Op;
 	nibble_t D2_Out;
@@ -154,7 +156,7 @@ enum decoder_outputs {
 	D_K11_4=0x38, D_K11_5=0x3a, D_K11_6=0x3c, D_K11_WRITE_DATA_BUS=0x3e,
 
 	D_H11_0=0x40, D_H11_1=0x42, D_H11_2=0x44, D_H11_WRITE_ALS_MSB=0x46,
-	D_H11_4=0x48, D_H11_5=0x4a, D_H11_READ_MAPROM=0x4c, D_H11_7=0x4e,
+	D_H11_4=0x48, D_H11_5=0x4a, D_H11_READ_MAPROM=0x4c, D_H11_READ_ALU_RESULT=0x4d, D_H11_7=0x4e,
 
 	D_E7_0=0x50, D_E7_1=0x52, D_E7_WRITE_SR=0x54, D_E7_3=0x56, D_E7_4=0x58, D_E7_5=0x5a, D_E7_6=0x5c, D_E7_7=0x5e
 };
@@ -194,7 +196,7 @@ static char *decoded_sig[6][8][2] = {
 		{"K11.1",""},
 		{"K11.2",""},
 		{"K11.3",""},
-		{"K11.4",""},
+		{"K11.4 (Write Register?)",""}, // Towards WRITE REGFILE K11.4 -> ?.H13Bp8 -> UD14.WE_/UD15.WE_
 		{"K11.5",""},
 		{"K11.6",""},
 		{"WRITE DATA REGISTER",""}
@@ -206,7 +208,7 @@ static char *decoded_sig[6][8][2] = {
 		{"WRITE ADDRESS LATCH MSB",""},
 		{"H11.4",""},
 		{"H11.5",""},
-		{"READ MAPPING PROM",""},
+		{"READ MAPPING PROM","READ ALU RESULT"},
 		{"H11.7",""}
 	},
 	{ // Decoder E7
@@ -337,7 +339,11 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 				case D_D3_READ_ILR: st->Bus.Dint=st->Reg.ILR; break;
 				case D_D3_READ_DIPSW_NIB_HIGH: st->Bus.Dint= (~st->IO.DIPSW>>4)&0x0f;
 				case D_D3_READ_uCDATA: st->Bus.Dint= ~t->uIW.DATA_; break;
-				case D_H11_READ_MAPROM: st->Bus.F= maprom[st->Bus.Dint]; break; 
+				case D_H11_READ_MAPROM: st->Bus.F= maprom[st->Bus.Dint]; st->ALU.OE_=1; break; 
+				case D_H11_READ_ALU_RESULT:
+					st->Bus.F= st->ALU.OE_=0;
+					st->Bus.F= (((st->ALU.Fhigh&0x0f)<<4)&0xf0) | ((st->ALU.Flow<<0)&0x0f);
+					break; 
 				default: break;
 
 			}
@@ -383,9 +389,9 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 	st->Seq.Cn=1; // Always increment (unless we find logic to disable)
 
-	st->Seq.S0S= (t->uIW.S0S)&0x3;
-	st->Seq.S1S= (t->uIW.S2S)&0x3;
-	st->Seq.S2S= (t->uIW.S1S)&0x3;
+	st->Seq.S0S= (~t->uIW.S0S)&0x3;
+	st->Seq.S1S= (~t->uIW.S2S)&0x3;
+	st->Seq.S2S= (~t->uIW.S1S)&0x3;
 
 	st->Seq.FE_= t->uIW.FE_&0x1;
 	st->Seq.PUP= t->uIW.PUP&0x1;
@@ -409,6 +415,7 @@ void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 		clock_advance(&st->Seq.cl);
 	} while(st->Seq.cl.clk);
 
+	t->uADDR_Next= ((st->Seq.YS2&0x7)<<8) | ((st->Seq.YS1&0xf)<<4) | ((st->Seq.YS0&0xf)<<0);
 }
 
 void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
@@ -431,7 +438,6 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 	}
 
 	st->ALU.cl.clk=CLK_LO;
-	st->ALU.OE_=0;
 	do{
 		am2901_update(&st->dev.ALU0);
 		am2901_update(&st->dev.ALU1);
@@ -441,13 +447,13 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 	am2901_print_state(&st->dev.ALU0);
 	am2901_print_state(&st->dev.ALU1);
 
-	st->Bus.F= (((st->ALU.Fhigh&0x0f)<<4)&0xf0) | ((st->ALU.Flow<<0)&0x0f);
+	if(!st->ALU.OE_) { st->Bus.F= (((st->ALU.Fhigh&0x0f)<<4)&0xf0) | ((st->ALU.Flow<<0)&0x0f); }
 	t->F= st->Bus.F;
 	t->Dint=st->Bus.Dint;
 }
 
 void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) {
-	t->addr=addr;
+	t->uADDR=addr;
 	parse_uIW(&(t->uIW), in);
 
 	/* Fill in S1S from logic on S2S and S1S1_OVR_ signals */
@@ -525,6 +531,7 @@ void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) 
 	do_write_dests(cpu_st, t);
 	
 	uIW_trace_run_Seqs(cpu_st, t);
+
 	
 }
 
@@ -637,23 +644,24 @@ void print_decoder_values(enum decoder_enum d, uint8_t v) {
 }
 
 void print_uIW_trace(uIW_trace_t *t) {
-	printf("uCData: D/uADDR=%#05x (DATA_=%#04x)", t->uIW.uADDR, (~t->uIW.DATA_)&0xff);
+	printf("Current Address: 0x%03x  Previous Address: 0x%03x  Next Address: 0x%03x\n", t->uADDR, t->uADDR_Prev, t->uADDR_Next);
+	printf("uCData: D/uADDR=0x%03x (DATA_=0x%02x)", t->uIW.uADDR, (~t->uIW.DATA_)&0xff);
 	printf(" Shifter: %s / Carry Select: %s (SHCS=%0x)\n",shifter_ops[t->S_Shift], carry_ops[t->S_Carry], t->uIW.SHCS);
-	printf("Internal Bus: %04x\n", t->Dint);
-	printf("ALUs: A=%01x B=%01x RS=%s %s -> %s\n",
+	printf("Internal Bus: 0x%02x\n", t->Dint);
+	printf("ALUs: A=0x%01x B=0x%01x RS=%s %s -> %s\n",
 		t->uIW.A,
 		t->uIW.B,
 		am2901_source_operand_mnemonics[t->uIW.I210],
 		am2901_function_symbol[t->uIW.I543],
 		am2901_destination_mnemonics[t->uIW.I876]
 	);
-	printf("ALU Results: %#04x\n",t->F);
+	printf("F-Bus: 0x%02x\n",t->F);
 	printf("Seqs: S0: %s, S1: %s, S2: %s\n",
 		am2909_ops[t->Seq0Op][3],
 		am2909_ops[t->Seq1Op][3],
 		am2909_ops[t->Seq2Op][3]
 	);
-	printf("\nDecoders E7:%02x H11: %02x K11: %02x E6: %02x D3: %02x D2 %02x\n",
+	printf("\nDecoders E7:0x%02x H11:0x%02x K11:0x%02x E6:0x%02x D3:0x%02x D2:0x%02x\n",
 		t->E7_Out, t->H11_Out, t->K11_Out, t->E6_Out, t->D3_Out, t->D2_Out);
 
 	print_decoder_values(D_D2,  t->D2_Out);
@@ -679,6 +687,7 @@ void init_cpu_state(cpu_state_t *st) {
 int main(int argc, char **argv) {
 	int r;
 	uint16_t tmp;
+	word_t uA, uAp;
 	uint64_t salad;
 	char binstr[100];
 	cpu_state_t cpu_st;
@@ -687,17 +696,22 @@ int main(int argc, char **argv) {
 		merge_roms();
 
 		init_cpu_state(&cpu_st);
-
+		uA=0; uAp=0;
 		for(int i=0; i<ROMSIZE; i++) {
 			//printf("\n%#06x: %#06x",i,allrom[0][i]);
 			//byte_bits_to_binary_string_grouped(binstr, allrom[0][i], NUMROMS*8, 1);
 			//printf("   %s",binstr);
 			//int64_bits_to_binary_string_grouped(binstr, iws[i], NUMROMS*8,4);
-			int64_bits_to_binary_string_fields(binstr, iws[i], NUMROMS*8,
+			int64_bits_to_binary_string_fields(binstr, iws[uA], NUMROMS*8,
 				"\x1\1\1\x2\x4\x4\x3\x3\x3\x1\x2\x2\x2\x3\x4\x4\x3\x3\x3\x3\x4");
-			printf(" %#06x: %#018"PRIx64" %s\n",i,iws[i],binstr);
-			trace_uIW(&cpu_st, &trace[i],i,iws[i]);
+			printf(" 0x%#03x: 0x%016"PRIx64" %s\n",uA,iws[uA],binstr);
+			//trace_uIW(&cpu_st, &trace[i],i,iws[i]);
+			trace[i].uADDR_Prev=uAp;
+			trace_uIW(&cpu_st, &trace[i],uA,iws[uA]);
 			print_uIW_trace(&trace[i]);
+			uAp=uA;
+			uA=trace[i].uADDR_Next;
+			//uA=i;
 		/*	
 			printf(" 2901:");
 			printf(" I=%03o",BITRANGE(iws[i],34,9));

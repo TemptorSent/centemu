@@ -43,7 +43,8 @@ char *am2909_clock_edge_LH(am2909_device_t *dev) {
 
 	/* Set output values Y if OE_ is LOW (HiZ=1) */
 	TRI_OUTPUT(S_(Y),!S_(OE_),O);
-	deroach(" Y=%s\n",!S_(OE_)?"O":"HiZ");
+	if(S_(OE_)) { deroach(" Y=HiZ\n"); } 
+	else { deroach(" Y=%2x\n",S_(Y)); }
 	return(0);
 }
 

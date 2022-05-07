@@ -254,19 +254,19 @@ void bitsalad_shooter(bitsalad_bag_t *bag) {
 		case BITSALAD_BAG_SMALL:
 			deroach("Shooting a small bag of bitsalad: ");
 			bitsalad_tosser_n_byte(bag->serving, bag->in.byte, bag->out.byte, bag->salad.small);
-			deroach("in: %#04x  bits:%2x  salad: %#010x  out: %#04x\n",
+			deroach("in: 0x%02x  bits:%2x  salad: 0x%08x  out: 0x%02x\n",
 					*bag->in.byte, bag->serving, bag->salad.small, *bag->out.byte);
 			break;
 		case BITSALAD_BAG_MEDIUM:
 			deroach("Shooting a medium bag of bitsalad: ");
 			bitsalad_tosser_byte_n_word(bag->serving, bag->in.word, bag->out.byte, bag->salad.small);
-			deroach("in: %#06x  bits:%2x  salad: %#010x  out: %#04x\n",
+			deroach("in: 0x%04x  bits:%2x  salad: 0x%08x  out: 0x%02x\n",
 					*bag->in.word, bag->serving, bag->salad.small, *bag->out.byte);
 			break;
 		case BITSALAD_BAG_LARGE:
 			deroach("Shooting a large bag of bitsalad: ");
 			bitsalad_tosser_n_word(bag->serving, bag->in.word, bag->out.word, bag->salad.large);
-			deroach("in: %#06x  bits:%2x  salad: %#018"PRIx64"  out: %#06x\n",
+			deroach("in: 0x%04x  bits:%2x  salad: 0x%016"PRIx64"  out: 0x%04x\n",
 					*bag->in.word, bag->serving, bag->salad.large, *bag->out.word);
 			break;
 	}
