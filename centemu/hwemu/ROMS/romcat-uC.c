@@ -439,7 +439,7 @@ void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 		printf("OR1S0=ALU.FZ=%0x  ",st->ALU.FZ);
 		st->Seq.ORiS0= t->uIW.CASE_?0x0:( (st->ALU.FZ <<1) ) ;
 		printf("Seq.ORiS0=%0x\n",st->Seq.ORiS0);
-	}
+	} else { st->Seq.ORiS0=0; }
 
 	st->Seq.cl.clk=CLK_LO;
 	do{
@@ -740,7 +740,7 @@ int main(int argc, char **argv) {
 			//int64_bits_to_binary_string_grouped(binstr, iws[i], NUMROMS*8,4);
 			int64_bits_to_binary_string_fields(binstr, iws[uA], NUMROMS*8,
 				"\x1\1\1\x2\x4\x4\x3\x3\x3\x1\x2\x2\x2\x3\x4\x4\x3\x3\x3\x3\x4");
-			printf(" 0x%#03x: 0x%016"PRIx64" %s\n",uA,iws[uA],binstr);
+			printf("Cycle:%04u 0x%#03x: 0x%016"PRIx64" %s\n",i,uA,iws[uA],binstr);
 			//trace_uIW(&cpu_st, &trace[i],i,iws[i]);
 			trace[i].uADDR_Prev=uAp;
 			trace_uIW(&cpu_st, &trace[i],uA,iws[uA]);
