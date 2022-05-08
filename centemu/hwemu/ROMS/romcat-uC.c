@@ -433,6 +433,14 @@ void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 	st->Seq.OE_= 0;
 	st->Seq.ZERO_= 1;
 
+	// Try some logic on for size
+	if(!t->uIW.CASE_) {
+		printf("Let's try a conditoinal!\n");
+		printf("OR1S0=ALU.FZ=%0x  ",st->ALU.FZ);
+		st->Seq.ORiS0= t->uIW.CASE_?0x0:( (st->ALU.FZ <<1) ) ;
+		printf("Seq.ORiS0=%0x\n",st->Seq.ORiS0);
+	}
+
 	st->Seq.cl.clk=CLK_LO;
 	do{
 		am2909_update(&st->dev.Seq0);
