@@ -406,7 +406,7 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 				case D_E6_WRITE_SEQ_AR:
 					st->Seq.RiS0= (st->Bus.F&0x0f)>>0;
 					st->Seq.RiS1= (st->Bus.F&0xf0)>>4;
-					st->Seq.RE_=0;
+					st->Seq.RE_=0; // Cheat for now, but this would be the 'proper' way.
 					break;
 				case D_K11_WRITE_EXT_DATA_BUS: st->Reg.DBRL=st->Bus.R; break;
 				case D_H11_WRITE_ALS_MSB: st->Reg.ALS= (st->Reg.ALS&0xff00) | (st->Bus.iD<<8); break;
@@ -439,8 +439,8 @@ void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 	st->Seq.DiS1= (t->uIW.uADDR&0x0f0)>>4;
 	st->Seq.DiS2= (t->uIW.uADDR&0x700)>>8;
 	
-	st->Seq.RiS0= (st->Bus.F&0x0f)>>0;
-	st->Seq.RiS1= (st->Bus.F&0xf0)>>4;
+	//st->Seq.RiS0= (st->Bus.F&0x0f)>>0;
+	//st->Seq.RiS1= (st->Bus.F&0xf0)>>4;
 
 	// Force for now until we find logic connectoins for these
 	st->Seq.OE_= 0;
@@ -484,12 +484,12 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 		st->ALU.RAM7=st->Shifter.DownLine;
 	}
 
-	st->ALU.cl.clk=CLK_HI;
+	st->ALU.cl.clk=CLK_LH;
 	do{
 		am2901_update(&st->dev.ALU0);
 		am2901_update(&st->dev.ALU1);
 		clock_advance(&st->ALU.cl);
-	} while(st->ALU.cl.clk!=CLK_HI);
+	} while(st->ALU.cl.clk!=CLK_LH);
 
 	am2901_print_state(&st->dev.ALU0);
 	am2901_print_state(&st->dev.ALU1);
@@ -707,6 +707,7 @@ void print_uIW_trace(uIW_trace_t *t) {
 	printf("Current Address: 0x%03x  Previous Address: 0x%03x  Next Address: 0x%03x\n", t->uADDR, t->uADDR_Prev, t->uADDR_Next);
 	printf("uCData: D/uADDR=0x%03x (DATA_=0x%02x)", t->uIW.uADDR, (~t->uIW.DATA_)&0xff);
 	printf(" Shifter: %s / Carry Select: %s (SHCS=%0x)\n",shifter_ops[t->S_Shift], carry_ops[t->S_Carry], t->uIW.SHCS);
+	printf("Conditoinal: %s\n",t->uIW.CASE_?"No":"Yes");
 	printf("iD-Bus: 0x%02x\n", t->iD);
 	printf("ALUs: A=0x%01x B=0x%01x RS=%s %s -> %s\n",
 		t->uIW.A,
