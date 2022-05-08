@@ -110,6 +110,7 @@ typedef struct cpu_state_t {
 		word_t ALO; // Address Latch, Output
 		byte_t PTBAR; // Page Table Base Address Register
 		byte_t RF[0x100]; // Register File (ABXYZSCPx2x16)
+		byte_t LUF11; // Addressable latch UF11 - Controls EI_/DI, ExtADB_EN, etc.
 	} Reg;
 
 	struct IO {
@@ -145,6 +146,7 @@ typedef struct uIW_trace_t {
 	twobit_t S_Carry;
 	byte_t iD;
 	byte_t F;
+	byte_t R;
 	
 } uIW_trace_t;
 
@@ -159,7 +161,7 @@ enum decoder_outputs {
 	D_E6_0=0x20, D_E6_WRITE_RR=0x22, D_E6_WRITE_RIR=0x26, D_E6_3, D_E6_WRITE_PTBAR=0x28,
 	D_E6_ALS_SRC_PC=0x2a, D_E6_ALS_SRC_DATA=0x2b, D_E6_WRITE_SEQ_AR=0x2c, D_E6_7=0x2e,
 
-	D_K11_0=0x30, D_K11_1=0x32, D_K11_2=0x34, D_K11_3=0x36,
+	D_K11_0=0x30, D_K11_1=0x32, D_K11_2=0x34, D_K11_F11_ENABLE=0x36,
 	D_K11_4=0x38, D_K11_5=0x3a, D_K11_6=0x3c, D_K11_WRITE_EXT_DATA_BUS=0x3e,
 
 	D_H11_0=0x40, D_H11_1=0x42, D_H11_2=0x44, D_H11_WRITE_ALS_MSB=0x46,
@@ -202,7 +204,7 @@ static char *decoded_sig[6][8][2] = {
 		{"K11.0",""},
 		{"K11.1",""},
 		{"K11.2",""},
-		{"K11.3",""},
+		{"K11.3 (F11 Enable?)",""},
 		{"K11.4 (Write Register?) <- (R-Bus)",""}, // Towards WRITE REGFILE K11.4 -> ?.H13Bp8 -> UD14.WE_/UD15.WE_
 		{"K11.5",""},
 		{"K11.6",""},
@@ -361,13 +363,14 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 					//st->Bus.iD=st->Reg.DBRL;
 					st->Bus.iD=sysbus_read_data(st->Reg.ALO);
 					st->Bus.iD=0x01; // Force NOP
+					st->Bus.iD=0x10; // Force BL
 					break;
 				case D_D3_READ_ILR: st->Bus.iD=st->Reg.ILR; break;
 				case D_D3_READ_DIPSW_NIB_HIGH: st->Bus.iD= (~st->IO.DIPSW>>4)&0x0f;
 				case D_D3_READ_uCDATA: st->Bus.iD= ~t->uIW.DATA_; break;
 				case D_H11_READ_MAPROM: st->Bus.F= maprom[st->Bus.iD]; st->ALU.OE_=1; break; 
 				case D_H11_READ_ALU_RESULT:
-					st->Bus.F= st->ALU.OE_=0;
+					st->ALU.OE_=0;
 					st->Bus.F= (((st->ALU.Fhigh&0x0f)<<4)&0xf0) | ((st->ALU.Flow<<0)&0x0f);
 					break; 
 				default: break;
@@ -400,9 +403,19 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 				case D_E6_WRITE_RR: st->Reg.RR=st->Bus.F; break;
 				case D_E6_WRITE_RIR: st->Reg.RIR=st->Bus.F; break;
 				case D_E6_WRITE_PTBAR: st->Reg.PTBAR=st->Bus.F; break;
-				case D_E6_WRITE_SEQ_AR: st->Seq.RE_=0; break;
+				case D_E6_WRITE_SEQ_AR:
+					st->Seq.RiS0= (st->Bus.F&0x0f)>>0;
+					st->Seq.RiS1= (st->Bus.F&0xf0)>>4;
+					st->Seq.RE_=0;
+					break;
 				case D_K11_WRITE_EXT_DATA_BUS: st->Reg.DBRL=st->Bus.R; break;
 				case D_H11_WRITE_ALS_MSB: st->Reg.ALS= (st->Reg.ALS&0xff00) | (st->Bus.iD<<8); break;
+				case D_K11_F11_ENABLE:
+					bit_t D=t->uIW.B&0x1;
+					octal_t A=(t->uIW.B&0xe)>>1;
+					st->Reg.LUF11= ( st->Reg.LUF11 & (~(1<<A)&0xff) ) | (D<<A);
+					printf("UF11 latched bit %0x=%0x, now contains 0x%02x\n",A,D,st->Reg.LUF11);
+					break;
 				case D_E7_WRITE_SR: st->Reg.SR= st->Bus.iD; break;
 
 				default: break;
@@ -482,8 +495,6 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 	am2901_print_state(&st->dev.ALU1);
 
 	if(!st->ALU.OE_) { st->Bus.F= (((st->ALU.Fhigh&0x0f)<<4)&0xf0) | ((st->ALU.Flow<<0)&0x0f); }
-	t->F= st->Bus.F;
-	t->iD=st->Bus.iD;
 }
 
 
@@ -559,11 +570,24 @@ void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) 
 	 */
 	t->S_Shift=(t->uIW.I876&0x2?4:0)|t->uIW.SHCS;
 
+	t->R= cpu_st->Bus.R;
+	t->F= cpu_st->Bus.F;
+	t->iD=cpu_st->Bus.iD;
+
 	do_read_sources(cpu_st, t);
+	t->R= cpu_st->Bus.R;
+	t->F= cpu_st->Bus.F;
+	t->iD=cpu_st->Bus.iD;
 
 	uIW_trace_run_ALUs(cpu_st, t);
+	t->R= cpu_st->Bus.R;
+	t->F= cpu_st->Bus.F;
+	t->iD=cpu_st->Bus.iD;
 
 	do_write_dests(cpu_st, t);
+	t->R= cpu_st->Bus.R;
+	t->F= cpu_st->Bus.F;
+	t->iD=cpu_st->Bus.iD;
 	
 	uIW_trace_run_Seqs(cpu_st, t);
 
@@ -692,6 +716,7 @@ void print_uIW_trace(uIW_trace_t *t) {
 		am2901_destination_mnemonics[t->uIW.I876]
 	);
 	printf("F-Bus: 0x%02x\n",t->F);
+	printf("R-Bus: 0x%02x\n",t->R);
 	printf("Seqs: S0: %s, S1: %s, S2: %s\n",
 		am2909_ops[t->Seq0Op][3],
 		am2909_ops[t->Seq1Op][3],
@@ -718,6 +743,7 @@ void init_cpu_state(cpu_state_t *st) {
 	init_ALUs(st);
 	st->Bus.iD=0;
 	st->Bus.F=0;
+	st->Reg.LUF11=0;
 }
 
 int main(int argc, char **argv) {
