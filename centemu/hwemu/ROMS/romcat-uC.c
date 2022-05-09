@@ -603,24 +603,29 @@ void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) 
 	t->F= cpu_st->Bus.F;
 	t->iD=cpu_st->Bus.iD;
 
+	deroach("\nRunning READS:\n");
 	do_read_sources(cpu_st, t);
 	t->R= cpu_st->Bus.R;
 	t->F= cpu_st->Bus.F;
 	t->iD=cpu_st->Bus.iD;
 
+	deroach("\nRunning ALUs:");
 	uIW_trace_run_ALUs(cpu_st, t);
 	t->R= cpu_st->Bus.R;
 	t->F= cpu_st->Bus.F;
 	t->iD=cpu_st->Bus.iD;
 
+	deroach("\nRunning WRITES:\n");
 	do_write_dests(cpu_st, t);
 	t->R= cpu_st->Bus.R;
 	t->F= cpu_st->Bus.F;
 	t->iD=cpu_st->Bus.iD;
 	
+	deroach("\nRunning SEQs:\n");
 	uIW_trace_run_Seqs(cpu_st, t);
 
 	t->RIR=cpu_st->Reg.RIR;
+	deroach("\nCycle complete, here's your trace:\n");
 }
 
 void init_ALUs(cpu_state_t *st) {
