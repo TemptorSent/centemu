@@ -361,6 +361,7 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 				case D_D2_0_READ_DL:
 					st->Bus.iD= st->Reg.DL;
 					deroach("Read 0x%02x from Data Latch to iD-Bus\n", st->Bus.iD);
+					break;
 				case D_D2_1_READ_REG: // This needs an enable to toggle between IL and RIR for high nibble
 					nibble_t rIL= st->Reg.ILR;
 					nibble_t rREG= st->Reg.RIR&0x0f;
@@ -391,8 +392,9 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 					deroach("Read 0x%02x of uCDATA to iD-Bus\n",st->Bus.iD);
 					break;
 				case D_H11_6_READ_MAPROM:
-					st->Bus.F= maprom[st->Bus.iD]; st->ALU.OE_=1; break; 
+					st->Bus.F= maprom[st->Bus.iD]; st->ALU.OE_=1; 
 					deroach("Read 0x%02x from MAPROM address 0x%02x to F-Bus\n", st->Bus.F, st->Bus.iD);
+					break;
 				case D_H11_7_READ_ALU_RESULT:
 					st->ALU.OE_=0;
 					deroach("Reading ALU Y outputs to F-Bus enabled\n");
@@ -464,7 +466,9 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 					deroach("Wrote 0x%02x to MSB of Staging Address Latch, now holds 0x%04x (ALS)\n",
 						st->Bus.iD, st->Reg.ALS);
 					break;
-				case D_E7_2_WRITE_SR: deroach("This would write the Status Register if we had it setup\n") break;
+				case D_E7_2_WRITE_SR:
+					deroach("This would write the Status Register if we had it setup\n");
+					break;
 
 				default: break;
 
