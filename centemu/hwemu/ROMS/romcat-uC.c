@@ -147,6 +147,7 @@ typedef struct uIW_trace_t {
 	byte_t iD;
 	byte_t F;
 	byte_t R;
+	nibble_t RIR;
 	
 } uIW_trace_t;
 
@@ -158,7 +159,7 @@ enum decoder_outputs {
 	D_D3_0_D5_0=0x10, D_D3_1_D5_1=0x12, D_D3_READ_DATA_BUS=0x14, D_D3_READ_ILR=0x16,
 	D_D3_READ_DIPSW_NIB_HIGH=0x18, D_D3_READ_uCDATA=0x1a,
 
-	D_E6_0=0x20, D_E6_WRITE_RR=0x22, D_E6_WRITE_RIR=0x26, D_E6_3, D_E6_WRITE_PTBAR=0x28,
+	D_E6_0=0x20, D_E6_WRITE_RR=0x22, D_E6_WRITE_RIR=0x24, D_E6_3_D9_EN=0x26, D_E6_WRITE_PTBAR=0x28,
 	D_E6_ALS_SRC_PC=0x2a, D_E6_ALS_SRC_DATA=0x2b, D_E6_WRITE_SEQ_AR=0x2c, D_E6_7=0x2e,
 
 	D_K11_0=0x30, D_K11_1=0x32, D_K11_2=0x34, D_K11_F11_ENABLE=0x36,
@@ -167,7 +168,8 @@ enum decoder_outputs {
 	D_H11_0=0x40, D_H11_1=0x42, D_H11_2=0x44, D_H11_WRITE_ALS_MSB=0x46,
 	D_H11_4=0x48, D_H11_5=0x4a, D_H11_READ_MAPROM=0x4c, D_H11_READ_ALU_RESULT=0x4d, D_H11_7=0x4e,
 
-	D_E7_0=0x50, D_E7_1=0x52, D_E7_WRITE_SR=0x54, D_E7_3=0x56, D_E7_4=0x58, D_E7_5=0x5a, D_E7_6=0x5c, D_E7_7=0x5e
+	D_E7_0=0x50, D_E7_1_UE14_CLK_EN=0x52, D_E7_WRITE_SR=0x54, D_E7_3=0x56,
+	D_E7_4_UNUSED=0x58, D_E7_5_UNUSED=0x5a, D_E7_6_UNUSED=0x5c, D_E7_7_UNUSED=0x5e
 };
 
 
@@ -194,17 +196,17 @@ static char *decoded_sig[6][8][2] = {
 		{"E6.0",""},
 		{"WRITE RESULT REGISTER (R-Bus) <- (F-Bus)",""},
 		{"WRITE REGISTER INDEX SELECTION REGISTER <- (F-Bus)",""},
-		{"E6.3",""},
+		{"E6.3 (D9 Enable?)",""},
 		{"WRITE PAGETABLE BASE ADDRESS REGISTER <- (F-Bus)",""},
 		{"STAGING ADDRESS LATCH SOURCE = CURRENT PC <- (A-Bus)","STAGING ADDRESS LATCH SOURCE = RESULT <- (R-Bus)"},
 		{"WRITE DATA TO SEQUENCERS ADDRESS REGISTER <- (F-Bus)",""},
-		{"E6.7",""}
+		{"E6.7 (Load Condition Code Reg M12?)",""}
 	},
 	{ // Decoder K11
 		{"K11.0",""},
 		{"K11.1",""},
-		{"K11.2",""},
-		{"K11.3 (F11 Enable?)",""},
+		{"K11.2 (M13 Gate?)",""},
+		{"K11.3 (F11 Enable)",""},
 		{"K11.4 (Write Register?) <- (R-Bus)",""}, // Towards WRITE REGFILE K11.4 -> ?.H13Bp8 -> UD14.WE_/UD15.WE_
 		{"K11.5",""},
 		{"K11.6",""},
@@ -222,13 +224,13 @@ static char *decoded_sig[6][8][2] = {
 	},
 	{ // Decoder E7
 		{"E7.0",""},
-		{"E7.1",""},
+		{"E7.1 (E14 Clock enable?)",""},
 		{"WRITE STATUS REGISTER",""},
 		{"E7.3",""},
-		{"E7.4",""},
-		{"E7.5",""},
-		{"E7.6",""},
-		{"E7.7",""}
+		{"",""},
+		{"",""},
+		{"",""},
+		{"",""}
 	}
 
 };
@@ -331,7 +333,8 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 	uIW->FE_=BITRANGE(in,27,1); /* Sequencers (Push/Pop) File Enable (Active LO) */
 	uIW->uADDR=BITRANGE(in,16,11); /* uC Address (11bits, lower 8 multiplex with DATA_) */
 	uIW->DATA_=BITRANGE(in,16,8); /* Data (inverted) (=low 8 bits of uC Address) */
-	uIW->D_E7=BITRANGE(in,13,3); /* Decoder UE7 */
+	//uIW->??/=BITRANGE(in,15,1); /* Decoder UE7 */
+	uIW->D_E7=BITRANGE(in,13,2); /* Decoder UE7 */
 	uIW->D_H11=BITRANGE(in,10,3); /* Decoder UH11 */
 	uIW->D_K11=BITRANGE(in,7,3); /* Decoder UK11 */
 	uIW->D_E6=BITRANGE(in,4,3); /* Decoder UE6 */
@@ -397,12 +400,17 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 			case 4: v=t->H11_Out; break;
 			case 5: v=t->E7_Out; break;
 		}
+		//deroach("WRITE %0x: ",i);
 		for(int j=0; j<8; j++) {
 			e= (i<<4) | (j<<1) | ( (v&(1<<j))? 1:0);
+			//deroach(" 0x%2x",e);
 			switch(e) {
 				case D_E6_WRITE_RR: st->Reg.RR=st->Bus.F; break;
-				case D_E6_WRITE_RIR: st->Reg.RIR=st->Bus.F; break;
-				case D_E6_WRITE_PTBAR: st->Reg.PTBAR=st->Bus.F; break;
+				case D_E6_WRITE_RIR:
+					deroach("Register 0x%02x selected(RIR)\n",st->Bus.F);
+					st->Reg.RIR=st->Bus.F; break;
+				case D_E6_WRITE_PTBAR:
+						     st->Reg.PTBAR=st->Bus.F; break;
 				case D_E6_WRITE_SEQ_AR:
 					st->Seq.RiS0= (st->Bus.F&0x0f)>>0;
 					st->Seq.RiS1= (st->Bus.F&0xf0)>>4;
@@ -414,7 +422,7 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 					bit_t D=t->uIW.B&0x1;
 					octal_t A=(t->uIW.B&0xe)>>1;
 					st->Reg.LUF11= ( st->Reg.LUF11 & (~(1<<A)&0xff) ) | (D<<A);
-					printf("UF11 latched bit %0x=%0x, now contains 0x%02x\n",A,D,st->Reg.LUF11);
+					deroach("UF11 latched bit %0x=%0x, now contains 0x%02x\n",A,D,st->Reg.LUF11);
 					break;
 				case D_E7_WRITE_SR: st->Reg.SR= st->Bus.iD; break;
 
@@ -422,6 +430,7 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 
 			}
 		}
+		//deroach("\n");
 	}
 }
 
@@ -521,7 +530,7 @@ void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) 
 	t->E6_Out= ~( 1<<(t->uIW.D_E6) )&0xff;
 	t->K11_Out= ~( 1<<(t->uIW.D_K11) )&0xff;
 	t->H11_Out= ~( 1<<(t->uIW.D_H11) )&0xff;
-	t->E7_Out= ~( 1<<(t->uIW.D_E7) )&0xff;
+	t->E7_Out= ~( 1<<(t->uIW.D_E7) )&0x0f;
 
 	/* UF6 - Carry Control *
 	 * Select from 
@@ -591,7 +600,7 @@ void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) 
 	
 	uIW_trace_run_Seqs(cpu_st, t);
 
-	
+	t->RIR=cpu_st->Reg.RIR;
 }
 
 void init_ALUs(cpu_state_t *st) {
@@ -723,6 +732,7 @@ void print_uIW_trace(uIW_trace_t *t) {
 		am2909_ops[t->Seq1Op][3],
 		am2909_ops[t->Seq2Op][3]
 	);
+	printf("Selected register: 0x%01x\n",t->RIR);
 	printf("\nDecoders E7:0x%02x H11:0x%02x K11:0x%02x E6:0x%02x D3:0x%02x D2:0x%02x\n",
 		t->E7_Out, t->H11_Out, t->K11_Out, t->E6_Out, t->D3_Out, t->D2_Out);
 

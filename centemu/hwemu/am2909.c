@@ -17,27 +17,27 @@ char *am2909_clock_edge_LH(am2909_device_t *dev) {
 		/* If ZERO_=LO, force Y=0 */
 		if(!S_(ZERO_)) {
 			tuPC=0;
-			deroach("%s: Y=0 (ZERO_=LO)", I_(id));
+			deroach("%s: Y=0x0 (ZERO_=LO)", I_(id));
 		/* Otherwise, decode S to determine our source */
 		} else {
 			deroach("%s: uPC Source ", I_(id));
 			/* Select source to temp output O */
 			switch((enum am2909_source_code) S_(S)) {
-				case uPC: tuPC=I_(uPC); deroach("S0:uPC=0x%02x\n",tuPC); break;
-				case AR: tuPC=I_(AR); deroach("S1:AR=0x%02x\n",tuPC); break;
-				case STK0: tuPC=dev->STK[I_(SP)]; deroach("S2:STK[%0x]=0x%02x\n",I_(SP),tuPC); break;
-				case Di: tuPC=S_(Di); deroach("S3:Di=0x%02x\n",tuPC); break;
+				case uPC: tuPC=I_(uPC); deroach("S0:uPC=0x%01x\n",tuPC); break;
+				case AR: tuPC=I_(AR); deroach("S1:AR=0x%01x\n",tuPC); break;
+				case STK0: tuPC=dev->STK[I_(SP)]; deroach("S2:STK[%0x]=0x%01x\n",I_(SP),tuPC); break;
+				case Di: tuPC=S_(Di); deroach("S3:Di=0x%01x\n",tuPC); break;
 			}
 
 			/* Apply ORi to O */
 			tuPC|= oS_(ORi,0);
-			deroach("\tY=uPC=0x%02x", tuPC);
-			if(oS_(ORi,0)){ deroach(" ORi=0x%02x", oS_(ORi,0)); }
+			deroach("\tY=uPC=0x%01x", tuPC);
+			if(oS_(ORi,0)){ deroach(" ORi=0x%01x", oS_(ORi,0)); }
 		}
 		S_(Y)= I_(uPC)= tuPC; // Store our uPC and output it to Y
 		
 	}
-	deroach("\n");
+	deroach("\n\t");
 
 
 	/* Push/Pop as indicated by FE_ and PUP */
@@ -46,26 +46,26 @@ char *am2909_clock_edge_LH(am2909_device_t *dev) {
 		if(S_(PUP)) {
 			I_(SP)=(SP+1)&0x3;
 			dev->STK[I_(SP)]=ouPC;
-			deroach("\tSP++; PUSH STK[%01x]=0x%02x\n",I_(SP),ouPC);
+			deroach("SP++ (PUSH 0x%01x);",ouPC);
 		} else {
 			I_(SP)=SP?SP-1:0x3;
-			deroach("\tSP--; POP STK[%01x]=0x%02x\n",I_(SP),dev->STK[I_(SP)]);
+			deroach("SP-- (POP);");
 		}
-	} else { deroach("\tSP; HOLD STK[%01x]=0x%02x\n",I_(SP),dev->STK[I_(SP)]); }
+	} else { deroach("SP HOLD;"); }
 	
-	deroach("\tSP=%0x STK",I_(SP));
-	for(int i=0; i<4; i++) { deroach(" [%0x]=0x%02x ",i,dev->STK[i]); }
+	deroach(" SP=%01x STK",I_(SP));
+	for(int i=0; i<4; i++) { deroach(" [%0x]=0x%01x ",i,dev->STK[i]); }
 	printf("\n");
 
 
 	/* Latch Ri into AR if RE_ is LOW */
-	if( !S_(RE_) ){ I_(AR)= oS_(Ri, S_(Di)); deroach("\tLatching AR=%0x\n", I_(AR)); }
+	if( !S_(RE_) ){ I_(AR)= oS_(Ri, S_(Di)); deroach("\tLatching AR=0x%01x\n", I_(AR)); }
 
 	/* Increment our uPC based on Cn and set Co if needed */
 	S_(Co)= ( S_(Cn) && (I_(uPC)==0xf) )? 1 : 0;
 	I_(uPC)=(I_(uPC)+S_(Cn))&0xf;
 
-	deroach("\tNext uPC=%0x (Cin=%0x,Cout=%0x)\n",I_(uPC),S_(Cn),S_(Co));
+	deroach("\tNext uPC=0x%01x (Cin=%0x,Cout=%0x)\n",I_(uPC),S_(Cn),S_(Co));
 
 	return(0);
 }

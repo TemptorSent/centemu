@@ -1,4 +1,5 @@
 a.exe*
 *.exe
+*.stackdump
 *.o
 .*.swp
