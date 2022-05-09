@@ -99,17 +99,18 @@ typedef struct cpu_state_t {
 	} Bus;
 
 	struct Reg {
-		byte_t RIR; // Register Index Register
-		nibble_t ILR; // Interrupt Level Register
-		byte_t DBOR; // Databus Output Register
-		byte_t DBRL; // Databus Receive Latch
-		byte_t DL; // Data Latch
-		byte_t SR; // Status Register
-		byte_t RR; // Result Register
-		word_t ALS; // Address Latch, Staging
-		word_t ALO; // Address Latch, Output
-		byte_t PTBAR; // Page Table Base Address Register
-		byte_t RF[0x100]; // Register File (ABXYZSCPx2x16)
+		byte_t RIR; // Register Index Register (UC13)
+		nibble_t ILR; // Interrupt Level Register (UC15, read w/UH14)
+		byte_t DBOR; // Databus Output Register (UA11/UA12)
+		byte_t DBRL; // Databus Receive Latch (UA11/UA12)
+		byte_t DL; // Data Latch (UC11/UC12)
+		byte_t SR; // Status Register (UJ9)
+		byte_t RR; // Result Register (UC9)
+		word_t ALS; // Address Latch, Staging (UB2/UC2 / UB5/UC5)
+		word_t ALO; // Address Latch, Output (UB1/UC1 / UB6/UC6)
+		byte_t PTBAR; // Page Table Base Address Register (UD11)
+		byte_t PTBL[0x100]; // Page Table (2x256x4 SRAMs UB9/UB10)
+		byte_t RF[0x100]; // Register File (ABXYZSCPx2x16) (2x256x4 SRAMs UD14/UD15)
 		byte_t LUF11; // Addressable latch UF11 - Controls EI_/DI, ExtADB_EN, etc.
 	} Reg;
 
@@ -154,21 +155,21 @@ typedef struct uIW_trace_t {
 
 enum decoder_enum { D_D2, D_D3, D_E6, D_K11, D_H11, D_E7 };
 enum decoder_outputs {
-	D_D2_READ_DL=0x00, D_D2_READ_REG=0x02, D_D2_READ_ADDR_BUS_MSB=0x04, D_D2_READ_ADDR_BUS_LSB=0x06,
+	D_D2_0_READ_DL=0x00, D_D2_1_READ_REG=0x02, D_D2_2_READ_ADDR_BUS_MSB=0x04, D_D2_3_READ_ADDR_BUS_LSB=0x06,
 
-	D_D3_0_D5_0=0x10, D_D3_1_D5_1=0x12, D_D3_READ_DATA_BUS=0x14, D_D3_READ_ILR=0x16,
-	D_D3_READ_DIPSW_NIB_HIGH=0x18, D_D3_READ_uCDATA=0x1a,
+	D_D3_0_D5_0=0x10, D_D3_1_D5_1=0x12, D_D3_2_READ_DATA_BUS=0x14, D_D3_3_READ_ILR=0x16,
+	D_D3_4_READ_DIPSW_NIB_HIGH=0x18, D_D3_5_READ_uCDATA=0x1a,
 
-	D_E6_0=0x20, D_E6_WRITE_RR=0x22, D_E6_WRITE_RIR=0x24, D_E6_3_D9_EN=0x26, D_E6_WRITE_PTBAR=0x28,
-	D_E6_ALS_SRC_PC=0x2a, D_E6_ALS_SRC_DATA=0x2b, D_E6_WRITE_SEQ_AR=0x2c, D_E6_7=0x2e,
+	D_E6_0=0x20, D_E6_1_WRITE_RR=0x22, D_E6_2_WRITE_RIR=0x24, D_E6_3_D9_EN=0x26,
+	D_E6_4_WRITE_PTBAR=0x28, D_E6_5_ALS_SRC_PC=0x2a, D_E6_5_ALS_SRC_DATA=0x2b, D_E6_6_WRITE_SEQ_AR=0x2c, D_E6_7=0x2e,
 
-	D_K11_0=0x30, D_K11_1=0x32, D_K11_2=0x34, D_K11_F11_ENABLE=0x36,
-	D_K11_4=0x38, D_K11_5=0x3a, D_K11_6=0x3c, D_K11_WRITE_EXT_DATA_BUS=0x3e,
+	D_K11_0=0x30, D_K11_1=0x32, D_K11_2=0x34, D_K11_3_F11_ENABLE=0x36,
+	D_K11_4_WRITE_RF=0x38, D_K11_5=0x3a, D_K11_6=0x3c, D_K11_7_WRITE_EXT_DATA_BUS=0x3e,
 
-	D_H11_0=0x40, D_H11_1=0x42, D_H11_2=0x44, D_H11_WRITE_ALS_MSB=0x46,
-	D_H11_4=0x48, D_H11_5=0x4a, D_H11_READ_MAPROM=0x4c, D_H11_READ_ALU_RESULT=0x4d, D_H11_7=0x4e,
+	D_H11_0=0x40, D_H11_1=0x42, D_H11_2=0x44, D_H11_3_WRITE_ALS_MSB=0x46,
+	D_H11_4=0x48, D_H11_5=0x4a, D_H11_6_READ_MAPROM=0x4c, D_H11_7_READ_ALU_RESULT=0x4d, D_H11_7=0x4e,
 
-	D_E7_0=0x50, D_E7_1_UE14_CLK_EN=0x52, D_E7_WRITE_SR=0x54, D_E7_3=0x56,
+	D_E7_0=0x50, D_E7_1_UE14_CLK_EN=0x52, D_E7_2_WRITE_SR=0x54, D_E7_3=0x56,
 	D_E7_4_UNUSED=0x58, D_E7_5_UNUSED=0x5a, D_E7_6_UNUSED=0x5c, D_E7_7_UNUSED=0x5e
 };
 
@@ -207,7 +208,7 @@ static char *decoded_sig[6][8][2] = {
 		{"K11.1",""},
 		{"K11.2 (M13 Gate?)",""},
 		{"K11.3 (F11 Enable)",""},
-		{"K11.4 (Write Register?) <- (R-Bus)",""}, // Towards WRITE REGFILE K11.4 -> ?.H13Bp8 -> UD14.WE_/UD15.WE_
+		{"K11.4 (Write Register File?) <- (R-Bus)",""}, // Towards WRITE REGFILE K11.4 -> ?.H13Bp8 -> UD14.WE_/UD15.WE_
 		{"K11.5",""},
 		{"K11.6",""},
 		{"WRITE EXTERNAL DATA BUS REGISTER <- (R-Bus)",""}
@@ -357,22 +358,22 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 		for(int j=0; j<8; j++) {
 			e= (i<<4) | (j<<1) | ( (v&(1<<j))? 1:0);
 			switch(e) {
-				case D_D2_READ_DL: st->Bus.iD= st->Reg.DL;
-				case D_D2_READ_REG: // This needs an enable to toggle between IL and RIR for high nibble
+				case D_D2_0_READ_DL: st->Bus.iD= st->Reg.DL;
+				case D_D2_1_READ_REG: // This needs an enable to toggle between IL and RIR for high nibble
 					st->Bus.iD= st->Reg.RF[(st->Reg.ILR<<4) | (st->Reg.RIR&0x0f)]; break;
-				case D_D2_READ_ADDR_BUS_MSB: break;
-				case D_D2_READ_ADDR_BUS_LSB: break;
-				case D_D3_READ_DATA_BUS:
+				case D_D2_2_READ_ADDR_BUS_MSB: break;
+				case D_D2_3_READ_ADDR_BUS_LSB: break;
+				case D_D3_2_READ_DATA_BUS:
 					//st->Bus.iD=st->Reg.DBRL;
 					st->Bus.iD=sysbus_read_data(st->Reg.ALO);
 					st->Bus.iD=0x01; // Force NOP
 					st->Bus.iD=0x10; // Force BL
 					break;
-				case D_D3_READ_ILR: st->Bus.iD=st->Reg.ILR; break;
-				case D_D3_READ_DIPSW_NIB_HIGH: st->Bus.iD= (~st->IO.DIPSW>>4)&0x0f;
-				case D_D3_READ_uCDATA: st->Bus.iD= ~t->uIW.DATA_; break;
-				case D_H11_READ_MAPROM: st->Bus.F= maprom[st->Bus.iD]; st->ALU.OE_=1; break; 
-				case D_H11_READ_ALU_RESULT:
+				case D_D3_3_READ_ILR: st->Bus.iD=st->Reg.ILR; break;
+				case D_D3_4_READ_DIPSW_NIB_HIGH: st->Bus.iD= (~st->IO.DIPSW>>4)&0x0f;
+				case D_D3_5_READ_uCDATA: st->Bus.iD= ~t->uIW.DATA_; break;
+				case D_H11_6_READ_MAPROM: st->Bus.F= maprom[st->Bus.iD]; st->ALU.OE_=1; break; 
+				case D_H11_7_READ_ALU_RESULT:
 					st->ALU.OE_=0;
 					st->Bus.F= (((st->ALU.Fhigh&0x0f)<<4)&0xf0) | ((st->ALU.Flow<<0)&0x0f);
 					break; 
@@ -405,26 +406,45 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 			e= (i<<4) | (j<<1) | ( (v&(1<<j))? 1:0);
 			//deroach(" 0x%2x",e);
 			switch(e) {
-				case D_E6_WRITE_RR: st->Reg.RR=st->Bus.F; break;
-				case D_E6_WRITE_RIR:
-					deroach("Register 0x%02x selected(RIR)\n",st->Bus.F);
-					st->Reg.RIR=st->Bus.F; break;
-				case D_E6_WRITE_PTBAR:
-						     st->Reg.PTBAR=st->Bus.F; break;
-				case D_E6_WRITE_SEQ_AR:
+				case D_E6_1_WRITE_RR:
+					st->Reg.RR=st->Bus.F;
+					deroach("Wrote 0x%02x to Result Register (RR)\n",st->Reg.RR);
+					break;
+				case D_E6_2_WRITE_RIR:
+					st->Reg.RIR=st->Bus.F;
+					deroach("Register 0x%02x selected(RIR)\n",st->Reg.RIR);
+					break;
+				case D_E6_4_WRITE_PTBAR:
+					st->Reg.PTBAR=st->Bus.F;
+					deroach("Page Table Base Address set to 0x%02x\n",st->Reg.PTBAR);
+					break;
+				case D_E6_6_WRITE_SEQ_AR:
 					st->Seq.RiS0= (st->Bus.F&0x0f)>>0;
 					st->Seq.RiS1= (st->Bus.F&0xf0)>>4;
-					st->Seq.RE_=0; // Cheat for now, but this would be the 'proper' way.
+					st->Seq.RE_=0; // Cheat for now, but just this would be the 'proper' way.
+					deroach("Wrote Seq{1,0} AR=0x%01x%01x\n",st->Seq.RiS1, st->Seq.RiS0);
 					break;
-				case D_K11_WRITE_EXT_DATA_BUS: st->Reg.DBRL=st->Bus.R; break;
-				case D_H11_WRITE_ALS_MSB: st->Reg.ALS= (st->Reg.ALS&0xff00) | (st->Bus.iD<<8); break;
-				case D_K11_F11_ENABLE:
+				case D_K11_3_F11_ENABLE:
 					bit_t D=t->uIW.B&0x1;
 					octal_t A=(t->uIW.B&0xe)>>1;
 					st->Reg.LUF11= ( st->Reg.LUF11 & (~(1<<A)&0xff) ) | (D<<A);
 					deroach("UF11 latched bit %0x=%0x, now contains 0x%02x\n",A,D,st->Reg.LUF11);
 					break;
-				case D_E7_WRITE_SR: st->Reg.SR= st->Bus.iD; break;
+				case D_K11_4_WRITE_RF: // Write Register File indexed by RIR
+					st->Reg.RF[st->Reg.RIR]= st->Bus.R;
+					deroach("Wrote 0x%02x to Register File address 0x%02x\n",
+							st->Reg.RF[st->Reg.RIR], st->Reg.RIR);
+					break;
+				case D_K11_7_WRITE_EXT_DATA_BUS:
+					st->Reg.DBOR=st->Bus.R;
+					deroach("Wrote 0x%02x to External Databus Output Register (DBOR)\n",st->Reg.DBOR);
+					break;
+				case D_H11_3_WRITE_ALS_MSB:
+					st->Reg.ALS= (st->Reg.ALS&0x00ff) | (st->Bus.iD<<8);
+					deroach("Wrote 0x%02x to MSB of Staging Address Latch, now holds 0x%04x (ALS)\n",
+						st->Bus.iD, st->Reg.ALS);
+					break;
+				case D_E7_2_WRITE_SR: deroach("This would write the Status Register if we had it setup\n") break;
 
 				default: break;
 
@@ -776,7 +796,7 @@ int main(int argc, char **argv) {
 			//printf("   %s",binstr);
 			//int64_bits_to_binary_string_grouped(binstr, iws[i], NUMROMS*8,4);
 			int64_bits_to_binary_string_fields(binstr, iws[uA], NUMROMS*8,
-				"\x1\1\1\x2\x4\x4\x3\x3\x3\x1\x2\x2\x2\x3\x4\x4\x3\x3\x3\x3\x4");
+				"\x1\1\1\x2\x4\x4\x3\x3\x3\x1\x2\x2\x2\x3\x4\x4\x1\x2\x3\x3\x3\x4");
 			printf("Cycle:%04u 0x%#03x: 0x%016"PRIx64" %s\n",i,uA,iws[uA],binstr);
 			//trace_uIW(&cpu_st, &trace[i],i,iws[i]);
 			trace[i].uADDR_Prev=uAp;
