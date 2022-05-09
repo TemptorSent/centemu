@@ -177,7 +177,7 @@ enum decoder_outputs {
 static char *decoded_sig[6][8][2] = {
 	{ // Decoder D2 -> latch UD4
 		{"READ DATA LATCH -> (iD-Bus)",""}, // C12p1
-		{"READ REGISTER -> (iD-Bus)",""}, // D13p1
+		{"READ REGISTER FILE -> (iD-Bus)",""}, // D13p1
 		{"READ ADDRESS BUS MSB (A-Bus) -> (iD-Bus)",""}, // A6p7
 		{"READ ADDRESS BUS LSB (A-Bus)-> (iD-Bus)",""}, // A4p7
 		{"",""},{"",""},
@@ -358,9 +358,17 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 		for(int j=0; j<8; j++) {
 			e= (i<<4) | (j<<1) | ( (v&(1<<j))? 1:0);
 			switch(e) {
-				case D_D2_0_READ_DL: st->Bus.iD= st->Reg.DL;
+				case D_D2_0_READ_DL:
+					st->Bus.iD= st->Reg.DL;
+					deroach("Read 0x%02x from Data Latch to iD-Bus\n", st->Bus.iD);
 				case D_D2_1_READ_REG: // This needs an enable to toggle between IL and RIR for high nibble
-					st->Bus.iD= st->Reg.RF[(st->Reg.ILR<<4) | (st->Reg.RIR&0x0f)]; break;
+					nibble_t rIL= st->Reg.ILR;
+					nibble_t rREG= st->Reg.RIR&0x0f;
+					byte_t raddr= st->Reg.RIR; //(rILR<<4) | (rREG&0x0f) ;
+					st->Bus.iD= st->Reg.RF[raddr];
+					deroach("Read 0x%02x from Register File address 0x%02x to iD-Bus\n",
+						st->Bus.iD, raddr);
+					break;
 				case D_D2_2_READ_ADDR_BUS_MSB: break;
 				case D_D2_3_READ_ADDR_BUS_LSB: break;
 				case D_D3_2_READ_DATA_BUS:
@@ -368,14 +376,26 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 					st->Bus.iD=sysbus_read_data(st->Reg.ALO);
 					st->Bus.iD=0x01; // Force NOP
 					st->Bus.iD=0x10; // Force BL
+					deroach("Read 0x%02x from External Data Bus to iD-Bus\n", st->Bus.iD);
 					break;
-				case D_D3_3_READ_ILR: st->Bus.iD=st->Reg.ILR; break;
-				case D_D3_4_READ_DIPSW_NIB_HIGH: st->Bus.iD= (~st->IO.DIPSW>>4)&0x0f;
-				case D_D3_5_READ_uCDATA: st->Bus.iD= ~t->uIW.DATA_; break;
-				case D_H11_6_READ_MAPROM: st->Bus.F= maprom[st->Bus.iD]; st->ALU.OE_=1; break; 
+				case D_D3_3_READ_ILR:
+					st->Bus.iD=st->Reg.ILR;
+					deroach("Read 0x%02x from Interrupt Level Register to iD-Bus\n", st->Bus.iD);
+					break;
+				case D_D3_4_READ_DIPSW_NIB_HIGH:
+					st->Bus.iD= (~st->IO.DIPSW>>4)&0x0f;
+					deroach("Read 0x%01x from high nibble of Dip Switches to iD-Bus\n", st->Bus.iD);
+					break;
+				case D_D3_5_READ_uCDATA:
+					st->Bus.iD= ~t->uIW.DATA_;
+					deroach("Read 0x%02x of uCDATA to iD-Bus\n",st->Bus.iD);
+					break;
+				case D_H11_6_READ_MAPROM:
+					st->Bus.F= maprom[st->Bus.iD]; st->ALU.OE_=1; break; 
+					deroach("Read 0x%02x from MAPROM address 0x%02x to F-Bus\n", st->Bus.F, st->Bus.iD);
 				case D_H11_7_READ_ALU_RESULT:
 					st->ALU.OE_=0;
-					st->Bus.F= (((st->ALU.Fhigh&0x0f)<<4)&0xf0) | ((st->ALU.Flow<<0)&0x0f);
+					deroach("Reading ALU Y outputs to F-Bus enabled\n");
 					break; 
 				default: break;
 
@@ -408,27 +428,27 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 			switch(e) {
 				case D_E6_1_WRITE_RR:
 					st->Reg.RR=st->Bus.F;
-					deroach("Wrote 0x%02x to Result Register (RR)\n",st->Reg.RR);
+					deroach("Wrote 0x%02x to Result Register (RR)\n", st->Reg.RR);
 					break;
 				case D_E6_2_WRITE_RIR:
 					st->Reg.RIR=st->Bus.F;
-					deroach("Register 0x%02x selected(RIR)\n",st->Reg.RIR);
+					deroach("Register 0x%02x selected(RIR)\n", st->Reg.RIR);
 					break;
 				case D_E6_4_WRITE_PTBAR:
 					st->Reg.PTBAR=st->Bus.F;
-					deroach("Page Table Base Address set to 0x%02x\n",st->Reg.PTBAR);
+					deroach("Page Table Base Address set to 0x%02x\n", st->Reg.PTBAR);
 					break;
 				case D_E6_6_WRITE_SEQ_AR:
 					st->Seq.RiS0= (st->Bus.F&0x0f)>>0;
 					st->Seq.RiS1= (st->Bus.F&0xf0)>>4;
 					st->Seq.RE_=0; // Cheat for now, but just this would be the 'proper' way.
-					deroach("Wrote Seq{1,0} AR=0x%01x%01x\n",st->Seq.RiS1, st->Seq.RiS0);
+					deroach("Wrote Seq{1,0} AR=0x%01x%01x\n", st->Seq.RiS1, st->Seq.RiS0);
 					break;
 				case D_K11_3_F11_ENABLE:
 					bit_t D=t->uIW.B&0x1;
 					octal_t A=(t->uIW.B&0xe)>>1;
 					st->Reg.LUF11= ( st->Reg.LUF11 & (~(1<<A)&0xff) ) | (D<<A);
-					deroach("UF11 latched bit %0x=%0x, now contains 0x%02x\n",A,D,st->Reg.LUF11);
+					deroach("UF11 latched bit %0x=%0x, now contains 0x%02x\n", A, D, st->Reg.LUF11);
 					break;
 				case D_K11_4_WRITE_RF: // Write Register File indexed by RIR
 					st->Reg.RF[st->Reg.RIR]= st->Bus.R;
@@ -437,7 +457,7 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 					break;
 				case D_K11_7_WRITE_EXT_DATA_BUS:
 					st->Reg.DBOR=st->Bus.R;
-					deroach("Wrote 0x%02x to External Databus Output Register (DBOR)\n",st->Reg.DBOR);
+					deroach("Wrote 0x%02x to External Databus Output Register (DBOR)\n", st->Reg.DBOR);
 					break;
 				case D_H11_3_WRITE_ALS_MSB:
 					st->Reg.ALS= (st->Reg.ALS&0x00ff) | (st->Bus.iD<<8);
@@ -523,7 +543,10 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 	am2901_print_state(&st->dev.ALU0);
 	am2901_print_state(&st->dev.ALU1);
 
-	if(!st->ALU.OE_) { st->Bus.F= (((st->ALU.Fhigh&0x0f)<<4)&0xf0) | ((st->ALU.Flow<<0)&0x0f); }
+	if(!st->ALU.OE_) {
+		st->Bus.F= (((st->ALU.Fhigh&0x0f)<<4)&0xf0) | ((st->ALU.Flow<<0)&0x0f);
+		deroach("Read ALU Y=0x%02x to F-Bus\n", st->Bus.F);
+	}
 }
 
 
