@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <inttypes.h>
 #include "../logic-common.h"
 #include "../clockline.h"
@@ -17,6 +18,9 @@
 
 typedef struct comment_t { word_t addr; char *comment; } comment_t;
 #include "comments_generated.h"
+
+// Remeove me when address bus works
+byte_t inject;
 
 static uint8_t allrom[NUMROMS][ROMSIZE];
 static uint8_t mergedrom[ROMSIZE][NUMROMS];
@@ -78,7 +82,7 @@ typedef struct cpu_state_t {
 
 	struct Seq {
 		clockline_t cl; // Clockline
-		nibble_t DiS0, DiS1; octal_t DiS2; // uADDR input, split
+		nibble_t DiS0, DiS1, DiS2; // uADDR input, split
 		nibble_t RiS0, RiS1; // Ri inputs from F-bus
 		twobit_t S0S, S1S, S2S; // Sequencer Source Selects
 		bit_t FE_, PUP; // Shift controls, File Enable (Active LO), and Push/Pop
@@ -96,13 +100,17 @@ typedef struct cpu_state_t {
 		byte_t xD;
 		byte_t F;
 		byte_t R;
+		struct Sys {
+			uint32_t ADDR;
+			byte_t DATA;
+		} Sys;
 	} Bus;
 
 	struct Reg {
 		byte_t RIR; // Register Index Register (UC13)
 		nibble_t ILR; // Interrupt Level Register (UC15, read w/UH14)
-		byte_t DBOR; // Databus Output Register (UA11/UA12)
-		byte_t DBRL; // Databus Receive Latch (UA11/UA12)
+		byte_t SDBOR; // Databus Output Register (UA11/UA12)
+		byte_t SDBRL; // Databus Receive Latch (UA11/UA12)
 		byte_t DL; // Data Latch (UC11/UC12)
 		byte_t SR; // Status Register (UJ9)
 		byte_t RR; // Result Register (UC9)
@@ -155,18 +163,18 @@ typedef struct uIW_trace_t {
 
 enum decoder_enum { D_D2, D_D3, D_E6, D_K11, D_H11, D_E7 };
 enum decoder_outputs {
-	D_D2_0_READ_DL=0x00, D_D2_1_READ_REG=0x02, D_D2_2_READ_ADDR_BUS_MSB=0x04, D_D2_3_READ_ADDR_BUS_LSB=0x06,
+	D_D2_0_READ_DL=0x00, D_D2_1_READ_REG=0x02, D_D2_2_READ_BUS_SYS_ADDR_MSB=0x04, D_D2_3_READ_BUS_SYS_ADDR_LSB=0x06,
 
-	D_D3_0_D5_0=0x10, D_D3_1_D5_1=0x12, D_D3_2_READ_DATA_BUS=0x14, D_D3_3_READ_ILR=0x16,
+	D_D3_0_D5_0=0x10, D_D3_1_D5_1=0x12, D_D3_2_READ_BUS_SYS_DATA=0x14, D_D3_3_READ_ILR=0x16,
 	D_D3_4_READ_DIPSW_NIB_HIGH=0x18, D_D3_5_READ_uCDATA=0x1a,
 
 	D_E6_0=0x20, D_E6_1_WRITE_RR=0x22, D_E6_2_WRITE_RIR=0x24, D_E6_3_D9_EN=0x26,
 	D_E6_4_WRITE_PTBAR=0x28, D_E6_5_ALS_SRC_PC=0x2a, D_E6_5_ALS_SRC_DATA=0x2b, D_E6_6_WRITE_SEQ_AR=0x2c, D_E6_7=0x2e,
 
 	D_K11_0=0x30, D_K11_1=0x32, D_K11_2=0x34, D_K11_3_F11_ENABLE=0x36,
-	D_K11_4_WRITE_RF=0x38, D_K11_5=0x3a, D_K11_6=0x3c, D_K11_7_WRITE_EXT_DATA_BUS=0x3e,
+	D_K11_4_WRITE_RF=0x38, D_K11_5=0x3a, D_K11_6=0x3c, D_K11_7_WRITE_BUS_SYS_DATA=0x3e,
 
-	D_H11_0=0x40, D_H11_1=0x42, D_H11_2=0x44, D_H11_3_WRITE_ALS_MSB=0x46,
+	D_H11_0=0x40, D_H11_1_READ_RR=0x42, D_H11_2=0x44, D_H11_3_WRITE_ALS_MSB=0x46,
 	D_H11_4=0x48, D_H11_5=0x4a, D_H11_6_READ_MAPROM=0x4c, D_H11_7_READ_ALU_RESULT=0x4d, D_H11_7=0x4e,
 
 	D_E7_0=0x50, D_E7_1_UE14_CLK_EN=0x52, D_E7_2_WRITE_SR=0x54, D_E7_3=0x56,
@@ -215,7 +223,7 @@ static char *decoded_sig[6][8][2] = {
 	},
 	{ // Decoder H11
 		{"H11.0",""},
-		{"H11.1",""},
+		{"H11.1 (Read Result Register? -> (R-Bus))",""},
 		{"H11.2",""},
 		{"WRITE STAGING ADDRESS LATCH MSB <- (A-Bus/R-Bus)",""},
 		{"H11.4",""},
@@ -370,13 +378,19 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 					deroach("Read 0x%02x from Register File address 0x%02x to iD-Bus\n",
 						st->Bus.iD, raddr);
 					break;
-				case D_D2_2_READ_ADDR_BUS_MSB: break;
-				case D_D2_3_READ_ADDR_BUS_LSB: break;
-				case D_D3_2_READ_DATA_BUS:
-					//st->Bus.iD=st->Reg.DBRL;
-					st->Bus.iD=sysbus_read_data(st->Reg.ALO);
+				case D_D2_2_READ_BUS_SYS_ADDR_MSB:
+					st->Bus.iD= (st->Bus.Sys.ADDR & 0xff00)>>8;
+					deroach("Read 0x%02x from MSB of system Address Bus to iD-Bus\n", st->Bus.iD);
+					break;
+				case D_D2_3_READ_BUS_SYS_ADDR_LSB: break;
+					st->Bus.iD= (st->Bus.Sys.ADDR & 0x00ff)>>0;
+					deroach("Read 0x%02x from MSB of system Address Bus to iD-Bus\n", st->Bus.iD);
+					break;
+				case D_D3_2_READ_BUS_SYS_DATA:
+					//st->Bus.iD=st->Reg.SDBRL;
+					st->Bus.iD=sysbus_read_data(st->Bus.Sys.ADDR);
 					st->Bus.iD=0x01; // Force NOP
-					st->Bus.iD=0x10; // Force BL
+					st->Bus.iD=inject; // Force BL
 					deroach("Read 0x%02x from External Data Bus to iD-Bus\n", st->Bus.iD);
 					break;
 				case D_D3_3_READ_ILR:
@@ -391,8 +405,13 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 					st->Bus.iD= ~t->uIW.DATA_;
 					deroach("Read 0x%02x of uCDATA to iD-Bus\n",st->Bus.iD);
 					break;
+				case D_H11_1_READ_RR:
+					st->Bus.R= st->Reg.RR;
+					deroach("Read 0x%02x from Result Register to R-Bus\n", st->Bus.R);
+					break;
 				case D_H11_6_READ_MAPROM:
-					st->Bus.F= maprom[st->Bus.iD]; st->ALU.OE_=1; 
+					st->Bus.F= maprom[st->Bus.iD];
+					st->ALU.OE_=1; 
 					deroach("Read 0x%02x from MAPROM address 0x%02x to F-Bus\n", st->Bus.F, st->Bus.iD);
 					break;
 				case D_H11_7_READ_ALU_RESULT:
@@ -445,6 +464,7 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 					st->Seq.RiS1= (st->Bus.F&0xf0)>>4;
 					st->Seq.RE_=0; // Cheat for now, but just this would be the 'proper' way.
 					deroach("Wrote Seq{1,0} AR=0x%01x%01x\n", st->Seq.RiS1, st->Seq.RiS0);
+					//deroach("Sequencer AR latching enabled\n");
 					break;
 				case D_K11_3_F11_ENABLE:
 					bit_t D=t->uIW.B&0x1;
@@ -457,9 +477,9 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 					deroach("Wrote 0x%02x to Register File address 0x%02x\n",
 							st->Reg.RF[st->Reg.RIR], st->Reg.RIR);
 					break;
-				case D_K11_7_WRITE_EXT_DATA_BUS:
-					st->Reg.DBOR=st->Bus.R;
-					deroach("Wrote 0x%02x to External Databus Output Register (DBOR)\n", st->Reg.DBOR);
+				case D_K11_7_WRITE_BUS_SYS_DATA:
+					st->Reg.SDBOR=st->Bus.R;
+					deroach("Wrote 0x%02x to System Data Bus Output Register (SDBOR)\n", st->Reg.SDBOR);
 					break;
 				case D_H11_3_WRITE_ALS_MSB:
 					st->Reg.ALS= (st->Reg.ALS&0x00ff) | (st->Bus.iD<<8);
@@ -482,8 +502,9 @@ void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 	st->Seq.Cn=1; // Always increment (unless we find logic to disable)
 
 	st->Seq.S0S= (~t->uIW.S0S)&0x3;
-	st->Seq.S1S= (~t->uIW.S2S)&0x3;
-	st->Seq.S2S= (~t->uIW.S1S)&0x3;
+	st->Seq.S1S= (~t->uIW.S1S)&0x3;
+	st->Seq.S2S= (~t->uIW.S2S)&0x3;
+	printf("S0S=%0x  S1S=%0x  S2S=%0x\n",st->Seq.S0S, st->Seq.S1S, st->Seq.S2S);
 
 	st->Seq.FE_= t->uIW.FE_&0x1;
 	st->Seq.PUP= t->uIW.PUP&0x1;
@@ -561,7 +582,7 @@ void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) 
 	/* Fill in S1S from logic on S2S and S1S1_OVR_ signals */
 	/* S1S0 = S2S0, S1S1 = S2S1 -> INV -> NAND S1S1_OVR_ */
 	/* S1S =    NAND( INV(S2S1),                 S1S1_OVR_<<1       ) OR     S1S0 */
-	t->uIW.S1S= ( ~( (~t->uIW.S2S&0x2) & (t->uIW.S1S1_OVR_<<1) )&0x2) | ((t->uIW.S2S)&0x1) ;
+	t->uIW.S1S= ( (~( ((~t->uIW.S2S)&0x2) & (t->uIW.S1S1_OVR_<<1) ))&0x2) | ((t->uIW.S2S)&0x1) ;
 
 	/* Assemble complete sequencer operations for each sequencer */
 	/* S0&S2 S{01} -> (NAND INT_), FE_ -> (NAND INT_) -> INV (cancels), PUP has no NAND */
@@ -642,14 +663,15 @@ void trace_uIW(cpu_state_t *cpu_st, uIW_trace_t *t, uint16_t addr, uint64_t in) 
 	t->F= cpu_st->Bus.F;
 	t->iD=cpu_st->Bus.iD;
 
+	deroach("\nRunning SEQs:\n");
+	uIW_trace_run_Seqs(cpu_st, t);
+
 	deroach("\nRunning WRITES:\n");
 	do_write_dests(cpu_st, t);
 	t->R= cpu_st->Bus.R;
 	t->F= cpu_st->Bus.F;
 	t->iD=cpu_st->Bus.iD;
 	
-	deroach("\nRunning SEQs:\n");
-	uIW_trace_run_Seqs(cpu_st, t);
 
 	t->RIR=cpu_st->Reg.RIR;
 	deroach("\nCycle complete, here's your trace:\n");
@@ -809,6 +831,7 @@ void init_cpu_state(cpu_state_t *st) {
 	st->Reg.LUF11=0;
 }
 
+
 int main(int argc, char **argv) {
 	int r;
 	uint16_t tmp;
@@ -817,6 +840,10 @@ int main(int argc, char **argv) {
 	char binstr[100];
 	cpu_state_t cpu_st;
 	uIW_trace_t trace[ROMSIZE];
+	//Byte to force into sys data bus register
+	if(argc == 2) { inject=atoi(argv[1]); }
+	else { inject=0x01; }
+
 	if( (r=read_roms()) == 0 ) {
 		merge_roms();
 

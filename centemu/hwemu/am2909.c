@@ -8,6 +8,10 @@ char *am2909_clock_edge_LH(am2909_device_t *dev) {
 
 	ouPC=I_(uPC);
 
+	/* Latch Ri into AR if RE_ is LOW */
+	if( !S_(RE_) ){ I_(AR)= oS_(Ri, S_(Di)); deroach("\tLatching AR=0x%01x\n", I_(AR)); }
+
+
 	/* Output first */
 	/* If OE_=HI, don't output anything (nor change uPC from MUX?) */
 	if(S_(OE_)) {
@@ -57,9 +61,6 @@ char *am2909_clock_edge_LH(am2909_device_t *dev) {
 	for(int i=0; i<4; i++) { deroach(" [%0x]=0x%01x ",i,dev->STK[i]); }
 	printf("\n");
 
-
-	/* Latch Ri into AR if RE_ is LOW */
-	if( !S_(RE_) ){ I_(AR)= oS_(Ri, S_(Di)); deroach("\tLatching AR=0x%01x\n", I_(AR)); }
 
 	/* Increment our uPC based on Cn and set Co if needed */
 	S_(Co)= ( S_(Cn) && (I_(uPC)==0xf) )? 1 : 0;
