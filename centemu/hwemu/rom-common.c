@@ -1,6 +1,6 @@
 #include <errno.h>
 #include <stdio.h>
-
+#include "rom-common.h"
 int rom_read_file(char *filename, uint16_t size, uint8_t *data ) {
 	FILE *fp;
 	size_t ret_code;

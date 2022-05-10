@@ -1,0 +1,222 @@
+#
+# J5
+#	ROM	'377	Dest
+
+	7	0	K9p7
+	6	1	E7p2
+	2	2	H11p1
+	3	3	H11p2
+	4	4	H11p3
+	5	5	E7P1
+	1	6	H13p12
+	0	7	K12p8
+
+# Register file MSB/LSB selection
+		UC13 ->
+! p2 or p15 (Q0 or Q5)
+		?-> ? (Logic before UD10A?)
+		-> UD10A (NOR)
+! p2,p3
+		-> UD14.A7
+
+# Register file IL/addressed mode nibble selection
+		UC13 ->
+		UC15 ->
+		-> UC14
+! p1 TOP PRIORITY
+! p{3,6,10,13} (I1a-I1d) <- UC15 p14-p11 (Q0-Q3) CONFIRM ORDER
+! p11 (I0c) <- UC13 p15(Q5) (or pos. p2(Q0)) CONFIRM
+
+
+
+
+
+# Address Latch Clock and Count Pulse Control
+#UD6	74LS157
+CLK_? ->	I0a	-> CLK_UD6Za "CLK_OAL"
+		I0c 	-> CLK_UD6Zc "CLK_SAL"
+CLK_? ->	I1b	-> CLK_UD6Zb "CEP_OAL"
+		I1d	-> CLK_UD6Zd "CEP_SAL"
+! p1, p{2,11}, p{6,13} 
+? p3,p5,p10,p14,p15 (may be unused, tied high/low)
+
+
+
+# Bus connections
+uABus<0:10>->		U[EFHJKLM]3 A0-A10 p{8,7,6,5,4,3,2,1,23,22,21}
+->uIW<0:55>		U[EJMLFHK]3 0-6 * D0-D8 p9-p17
+uIW<8:55>->		U[JMLFHK]4 1-6 * D{7,6,2,3,4,5,1,0} p{18,17,7,8,13,14,3,4}
+->uIWL<8:55>		U[JMLFHK]4 1-6 * Q{7,6,2,3,4,5,1,0} p{19,16,6,9,12,15,2,5}
+
+uIW<4:7>->		UE5 D{3,0,4,5} p{11,3,13,14}
+uIW<3>->		UD2 EN_ p1 & UD3 E3 p6
+uIW<0:2>->		UD3 A0-A2 p1-p3
+uIW<0:1>->		UD2 A0-A1 p2-p3
+
+->B-Bus<0:3>		uIWL<43:46>
+uIWL<16:23>		UM6 (?)I{3b,2b,1b,?,0a,?,1a,3a} p{17,15,13,?,2,?,4,8} (? I0b/p11 I2a/p6)
+
+# iD-Bus - Internal Data Bus
+READ_CONST_: (EN_: UD3.5 -> UD5 -> UM6p18)
+->iD-Bus<0:7>		UM6 (?)O{3b,2b,1b,?,0a,?,1a,3a}[INV] p{3,5,7,?,18,?,16,12} (? O0b/p18 O2a/p14)
+
+READ_DIPSW_HIGH_NIB_: (EN_: UD3.4 -> UD5 -> UM7p1)
+->iD-Bus<0:3>		UM7 ?O3a,O{2a-0a}[INV]  p{?12,14,16,18}
+
+READ_DIPSW_LOW_NIB_: (?EN_: UD3.4 -> UD5 -> UM7p13)
+->iD-Bus<0:3>		UM7 O0b? O{1b-3b}[INV]  p{?9,7,5,3}
+
+READ_ILR_: (EN_: UD3.3 -> UD5 -> UA8p7)
+->iD-Bus<0:3>		UH14 O{4a-1a}[INV] p{9,7,5,3}
+
+READ_REGFILE: (EN_: UD2.1 -> UD4 -> UD13p1)
+->iD-Bus<0:7>		UD13 O{4,?,?,?,3,?,?,?} p{12,?,?,?,9,?,?,?} ?p{2,4,6,15,16,19}
+
+READ_iDB_NIBBLES?: (E1_/E2_: ?? -> UC{11,12}p{9,10}; Oe1_: ?? -> UC{11,12}p1; Oe2_: ?? -> UC{11,12}p2)
+->iD-Bus<0:3>?		UC12 Q{?,1,?,?} p{?3,4,?5,?6}
+->iD-Bus<4:7>?		UC12 Q{?,2,?,?} p{?3,4,?5,?6}
+
+READ_SYSBUS_DATA: (OE_: UD3.3 -> UD5 -> A{11,12}p11)
+->iD-Bus<0:3>		UA11 OUT{3-0} p{18,12,8,2}
+->iD-Bus<4:7>		UA12 OUT{3-0} p{18,12,8,2}
+
+READ_SYSBUS_ADDR_MSB: (R_/OEb_: UD2.2 -> UD4 -> A6p7/UA7p19)
+->iD-Bus<0:3>		UA6 OUT{0-3} p{3,6,10,13}
+->iD-Bus<4:7>		UA7/UA8 HOW?
+
+READ_SYSBUS_ADDR_LSB: (R_: UD2.3 -> UD4 ->A{4,5}p7)
+->iD-Bus<0:3>		UA4 OUT{0-3} p{3,6,10,13}
+->iD-Bus<4:7>		UA5 OUT{0-3} p{3,6,10,13}
+
+
+#F-Bus
+
+
+
+
+
+# Target signals, multiple devices
+# Sig			IC		Pin	Label   Known/[Needed] (Function)
+
+CLK_H12In:
+	IN	+	SN74120		5,11	CP	UH12A/UH12B (Dual Pulse Sync/Driver)
+
+CLK_H12A: =CLK_H12In
+	Drive	+	SN74120		6	Y	UH12B (Dual Pulse Sync/Driver)
+		+	74LS10		2	B	UE10A (3-in NAND w/ CLK_UH12B)
+		+	74LS10		3	A	UE11B (3-in NAND)
+CLK_UE11B: =~CLK_H12A
+	Drive	-	74LS10		6	Y	UE11B (3-in NAND)
+
+
+CLK_H12B: =CLK_H12In
+	Drive	+	SN74120		10	Y	UH12B (Dual Pulse Sync/Driver)
+		+	74LS10		13	C	UE10A (3-in NAND w/ CLK_UH12A)
+		+	74LS00		4,5	A,B	UK10B (NAND used as inverter)
+		+	74LS02		5,6	A,B	UE8B (NOR used as inverter)
+		+	74LS04		1	A	UJ6A (Inverter)
+
+CLK_UJ6A: =~CLK_H12B
+	Drive	-	74LS04		2	Y	UJ6A (Inverter)
+		-LH	AM2909		27	CP	UJ7/UK7 (Sequencers)
+		-LH	AM2911		1	CP	UL9 (Sequencer)
+		-LH	74LS377		11	CP	UH5-UM5 (uIW Latch)
+
+CLK_UE8B: =~CLK_H12B
+	Drive	-	74LS02		4	Y	UE8B (NOR used as inverter)
+		-	74LS02		2	A	UE8A (NOR UE7_1p14)
+		-LH	74LS174		9	Cp	UE5,UD4,UD5 (iIW Decoder Latches)
+		-LH	74LS378		9	C	UD9,UD11 ()
+		-LH	74LS374		11	Cp	UD13 ()
+		-LH	74LS377		11	Cp	UC9
+		-LH	74LS173		7	Cp	UC11/UC12 ()
+		-LH	74LS377		11	CP	UC13 (Register Select - RIR)
+
+CLK_UK10B: =~CLK_H12B
+	Drive	-	74LS00		6	Y	UK10B (NAND used as inverter)
+		--	74LS138		4,5	E1_,E2_	UK11 (Decoder)
+		-LH	74LS378		9	C	UJ9 (Latch)
+		-*	AM2901		15	CP	UF7/UF9 (ALUs)
+
+CLK_UE10A: =~(?A? & CLK_H12A & CLK_H12B)
+	Drive	-	74LS10		12	C	UE10A (3-in NAND)
+
+CLK_UE8A: =~(CLK_UE8B | UE7_1)
+	Drive	-	74LS02		1	Y	UE8A (NOR UE7_1p14)
+
+
+CLK_UD6Za: =(S?I1a:I0a) 
+	Drive	+	74LS157		4	Za	UD6 (MUX, Drives Output Address Latches CK)
+		+LH	74LS669		2	CK	UB1,UC1,UB6,UC6 (Output Address Latches)
+
+CLK_UC10A: =~(?A?)
+	Drive	-	74LS04		2	Y	UC10A (Inverter (Source?))
+		-	74LS04		9	A	UA15D (Inverter)
+CLK_UA15D: =~CLK_UC10A
+	Drive	+	74LS04		8	Y	UA15D (Inverter)
+		+	74LS04		3	A	UA15B (Inverter)
+		+	74LS37		4,5	A,B	UA13B (NAND used as inverter)
+CLK_UA15B: =~CLK_UC15D
+	Drive	-	74LS04		4	Y	UA15B (Inverter)
+		-LH	74LS669		2	CK	UC15
+CLK_UA13B: =~CLK_UA15D
+	Drive	-	74LS37		6	Y	UA13B (NAND used as inverter)
+		-	74LS37		9	A	UA13C (NAND with?)
+CLK_UA13C: =~(CLK_UA13B & ??B??)
+	Drive	+	74LS37		8	Y	UA13C (NAND with?)
+		+	74LS37		2	B	UA13A (NAND with? Drives Sys 5MHz CLK)
+CLK_SYS5MHz: =~(?A? & CLK_UA13C)
+		-	74LS37		3	Y	UA13A (NAND with? Drives Sys 5MHz CLK)
+
+
+CLK_K11O5: =~(~CLK_UK10B & ?A0? & ~?A1? & ?A2?)
+	Drive	-	74LS138		10	O5	UK11 (Decoder enabled by CLK_UK10B)
+		--	74LS74		10	S_	UE15B (Pos Edge Triggerd Flip-Flop)
+		-LH	AM2907		19	A_CP	UA11/UA12 (Bus xcvr w/RX Latch for Sys Databus)
+
+CLK_UE15BQ_: =???
+	Drive	-	74LS74		8	Q_	UE15B (Pos Edge Triggerd Flip-Flop)
+		-	AM2907		9	BE_	UA11/UA12 (Bus xcvr w/RX Latch for Sys Databus)
+
+
+# Clock signal chains
+
+CLK_H12In:
+
+CLK_H12A: =CLK_H12In
+
+CLK_UE11B: =~(CLK_H12A=CLK_H12In)
+~
+
+CLK_H12B: =CLK_H12In
+
+CLK_UJ6A: =~(CLK_H12B=CLK_H12In)
+~
+CLK_UE8B: =~(CLK_H12B=CLK_H12In)
+~
+CLK_UK10B: =~(CLK_H12B=CLK_H12In)
+~
+CLK_UE10A: =~( ?UE10A_A? & (CLK_H12A=CLK_H12In) & (CLK_H12B=CLK_H12In) )
+~
+CLK_UE8A: =~( (CLK_UE8B=~(CLK_H12B=CLK_H12In)) | UE7_1 )
+~~
+
+CLK_UD6Za: =(S?I1a:I0a)
+
+
+CLK_UC10A: =~(?UC10A_A?)
+~
+CLK_UA15D: =~(CLK_UC10A=~(?UC10A_A?))
+~~
+CLK_UA15B: =~(CLK_UC15D=~(CLK_UC10A=~(?UC10A_A?)))
+~~~
+CLK_UA13B: =~(CLK_UA15D=~(CLK_UC10A=~(?UC10A_A?)))
+~~~
+CLK_UA13C: =~( (CLK_UA13B=~(CLK_UA15D=~(CLK_UC10A=~(?UC10A_A?))))  & ?UA13C_B?)
+~~~~
+CLK_SYS5MHz: =~(?UA13_A? & (CLK_UA13C=~( (CLK_UA13B=~(CLK_UA15D=~(CLK_UC10A=~(?UC10A_A?))))  & ?UA13C_B?)) )
+~~~~~
+CLK_K11O5: =~( (~CLK_UK10B=~(CLK_H12B=CLK_H12In)) & ?A0? & ~?A1? & ?A2?)
+~~~
+CLK_UE15BQ_: =???
+

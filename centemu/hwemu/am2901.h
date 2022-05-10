@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include "logic-common.h"
 #include "clockline.h"
 
 enum am2901_source_operand_code { AQ=00, AB=01, ZQ=02, ZB=03, ZA=04, DA=05, DQ=06, DZ=07 };

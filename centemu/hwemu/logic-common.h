@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 /* 'dev' accessors for values of external signals (pointers) and internal state of logic devices */
 #define defS_(sig) dev->sig=sig;
 #define S_(sig) (*(dev->sig))
