@@ -203,13 +203,13 @@ static char *decoded_sig[6][8][2] = {
 	},
 	{ // Decoder E6 (from latch E5)
 		{"E6.0",""},
-		{"WRITE RESULT REGISTER (R-Bus) <- (F-Bus)",""},
-		{"WRITE REGISTER INDEX SELECTION REGISTER <- (F-Bus)",""},
-		{"E6.3 (D9 Enable?)",""},
-		{"WRITE PAGETABLE BASE ADDRESS REGISTER <- (F-Bus)",""},
-		{"STAGING ADDRESS LATCH SOURCE = CURRENT PC <- (A-Bus)","STAGING ADDRESS LATCH SOURCE = RESULT <- (R-Bus)"},
-		{"WRITE DATA TO SEQUENCERS ADDRESS REGISTER <- (F-Bus)",""},
-		{"E6.7 (Load Condition Code Reg M12?)",""}
+		{"WRITE RESULT REGISTER (R-Bus) <- (F-Bus)",""}, // C9p1
+		{"WRITE REGISTER INDEX SELECTION REGISTER <- (F-Bus)",""}, // C13p1
+		{"E6.3 (D9 Enable?)",""}, // D9p1
+		{"WRITE PAGETABLE BASE ADDRESS REGISTER <- (F-Bus)",""},  // D11p1
+		{"STAGING ADDRESS LATCH SOURCE = CURRENT PC <- (A-Bus)","STAGING ADDRESS LATCH SOURCE = RESULT <- (R-Bus)"}, // C4p1
+		{"WRITE DATA TO SEQUENCERS ADDRESS REGISTER <- (F-Bus)",""}, // AM2909p1 (RE_)
+		{"E6.7 (Load Condition Code Reg M12?)",""} // M12p1
 	},
 	{ // Decoder K11
 		{"K11.0",""},
@@ -223,7 +223,7 @@ static char *decoded_sig[6][8][2] = {
 	},
 	{ // Decoder H11
 		{"H11.0",""},
-		{"H11.1 (Read Result Register? -> (R-Bus))",""},
+		{"H11.1 (X Read Result Register? -> (R-Bus))",""},
 		{"H11.2",""},
 		{"WRITE STAGING ADDRESS LATCH MSB <- (A-Bus/R-Bus)",""},
 		{"H11.4",""},
@@ -342,9 +342,11 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 	uIW->FE_=BITRANGE(in,27,1); /* Sequencers (Push/Pop) File Enable (Active LO) */
 	uIW->uADDR=BITRANGE(in,16,11); /* uC Address (11bits, lower 8 multiplex with DATA_) */
 	uIW->DATA_=BITRANGE(in,16,8); /* Data (inverted) (=low 8 bits of uC Address) */
-	//uIW->??/=BITRANGE(in,15,1); /* Decoder UE7 */
+	//uIW->??/=BITRANGE(in,15,1); /* MUX UK9p7 */
 	uIW->D_E7=BITRANGE(in,13,2); /* Decoder UE7 */
 	uIW->D_H11=BITRANGE(in,10,3); /* Decoder UH11 */
+	//uIW->NAND4_H13B_C=BITRANGE(in,9,1); /* Quad NAND Gate input C of UH13Bp12 */
+	//uIW->NOR_K12C_A=BITRANGE(in,8,1); /* NOR Gate input A of UK12Cp8 */
 	uIW->D_K11=BITRANGE(in,7,3); /* Decoder UK11 */
 	uIW->D_E6=BITRANGE(in,4,3); /* Decoder UE6 */
 	uIW->D_D2D3=BITRANGE(in,0,4); /* Decoders UD2(bit3=0) (low nibble out) and UD3(bit3=1) (high byte out) */
@@ -370,14 +372,14 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 					st->Bus.iD= st->Reg.DL;
 					deroach("Read 0x%02x from Data Latch to iD-Bus\n", st->Bus.iD);
 					break;
-				case D_D2_1_READ_REG: // This needs an enable to toggle between IL and RIR for high nibble
+				case D_D2_1_READ_REG: { // This needs an enable to toggle between IL and RIR for high nibble
 					nibble_t rIL= st->Reg.ILR;
 					nibble_t rREG= st->Reg.RIR&0x0f;
 					byte_t raddr= st->Reg.RIR; //(rILR<<4) | (rREG&0x0f) ;
 					st->Bus.iD= st->Reg.RF[raddr];
 					deroach("Read 0x%02x from Register File address 0x%02x to iD-Bus\n",
 						st->Bus.iD, raddr);
-					break;
+					}; break;
 				case D_D2_2_READ_BUS_SYS_ADDR_MSB:
 					st->Bus.iD= (st->Bus.Sys.ADDR & 0xff00)>>8;
 					deroach("Read 0x%02x from MSB of system Address Bus to iD-Bus\n", st->Bus.iD);
@@ -466,12 +468,12 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 					deroach("Wrote Seq{1,0} AR=0x%01x%01x\n", st->Seq.RiS1, st->Seq.RiS0);
 					//deroach("Sequencer AR latching enabled\n");
 					break;
-				case D_K11_3_F11_ENABLE:
+				case D_K11_3_F11_ENABLE: {
 					bit_t D=t->uIW.B&0x1;
 					octal_t A=(t->uIW.B&0xe)>>1;
 					st->Reg.LUF11= ( st->Reg.LUF11 & (~(1<<A)&0xff) ) | (D<<A);
 					deroach("UF11 latched bit %0x=%0x, now contains 0x%02x\n", A, D, st->Reg.LUF11);
-					break;
+					}; break;
 				case D_K11_4_WRITE_RF: // Write Register File indexed by RIR
 					st->Reg.RF[st->Reg.RIR]= st->Bus.R;
 					deroach("Wrote 0x%02x to Register File address 0x%02x\n",
