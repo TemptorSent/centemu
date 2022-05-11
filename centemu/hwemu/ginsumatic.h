@@ -155,3 +155,6 @@ char  *int64_bits_to_binary_string_fields(char *out, uint64_t in, uint8_t bits, 
 char  *int64_bits_to_binary_string_grouped(char *out, uint64_t in, uint8_t bits, uint8_t grouping);
 
 char  *byte_bits_to_binary_string_grouped(char *out, uint8_t in, uint8_t bits, uint8_t grouping);
+
+/* Convert hex character to nibble */
+nibble_t hexchar_to_nibble(char c);

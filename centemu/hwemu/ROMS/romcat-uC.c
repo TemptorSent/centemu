@@ -19,8 +19,10 @@
 typedef struct comment_t { word_t addr; char *comment; } comment_t;
 #include "comments_generated.h"
 
-// Remeove me when address bus works
-byte_t inject;
+// Inject bytes into system databus reads
+char **inject;
+byte_t inject_size;
+byte_t inject_pos;
 
 static uint8_t allrom[NUMROMS][ROMSIZE];
 static uint8_t mergedrom[ROMSIZE][NUMROMS];
@@ -318,6 +320,17 @@ void print_comments(word_t addr) {
 }
 
 byte_t sysbus_read_data(word_t address) {
+	char c,*p;
+	byte_t b=0;
+	if(inject_size) {
+
+		for(int i=0; i<2; i++) {
+			if((c=*(inject[inject_pos]+i))) { b|=hexchar_to_nibble(c)<<(4*(1-i)); }
+			else { break; }
+		}
+		inject_pos=(inject_pos+1)%inject_size;
+		return(b);
+	}
 	// Bootstrap ROM
 	if(address >= 0xfc00 && address < 0xfe00) {
 		return(bootstrap_rom[address-0xfc00]);
@@ -391,8 +404,8 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 				case D_D3_2_READ_BUS_SYS_DATA:
 					//st->Bus.iD=st->Reg.SDBRL;
 					st->Bus.iD=sysbus_read_data(st->Bus.Sys.ADDR);
-					st->Bus.iD=0x01; // Force NOP
-					st->Bus.iD=inject; // Force BL
+					//st->Bus.iD=0x01; // Force NOP
+					//st->Bus.iD=inject; // Force BL
 					deroach("Read 0x%02x from External Data Bus to iD-Bus\n", st->Bus.iD);
 					break;
 				case D_D3_3_READ_ILR:
@@ -833,6 +846,7 @@ void init_cpu_state(cpu_state_t *st) {
 	st->Reg.LUF11=0;
 }
 
+char *inj_NOP[1] = {"01"};
 
 int main(int argc, char **argv) {
 	int r;
@@ -843,8 +857,8 @@ int main(int argc, char **argv) {
 	cpu_state_t cpu_st;
 	uIW_trace_t trace[ROMSIZE];
 	//Byte to force into sys data bus register
-	if(argc == 2) { inject=atoi(argv[1]); }
-	else { inject=0x01; }
+	if(argc > 1 ) { inject=argv+1; inject_size=argc-1; }
+	else { inject=inj_NOP; inject_size=1; }
 
 	if( (r=read_roms()) == 0 ) {
 		merge_roms();

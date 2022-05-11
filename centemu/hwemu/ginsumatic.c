@@ -363,6 +363,14 @@ char  *byte_bits_to_binary_string_grouped(char *out, uint8_t in, uint8_t bits, u
 	return(out);
 }
 
+nibble_t hexchar_to_nibble(char c) {
+	if(c >= '0' && c <= '9') { return(c-'0'); }
+	if(c >= 'A' && c <= 'F') { return(c-'A'+10); }
+	if(c >= 'a' && c <= 'f') { return(c-'a'+10); }
+	printf("Passed unknown character '%c' to hexchar_to_nibble\n",c);
+	return(0);
+}
+
 int ginsumatic_main() {
 	char blendtec[8]="\x00\x01\x02\x03\x07\x06\x05\x04";
 	uint8_t in=0x55;
