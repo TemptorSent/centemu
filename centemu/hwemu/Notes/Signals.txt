@@ -53,8 +53,11 @@ uIW<3>->		UD2 EN_ p1 & UD3 E3 p6
 uIW<0:2>->		UD3 A0-A2 p1-p3
 uIW<0:1>->		UD2 A0-A1 p2-p3
 
-->B-Bus<0:3>		uIWL<43:46>
 uIWL<16:23>		UM6 (?)I{3b,2b,1b,?,0a,?,1a,3a} p{17,15,13,?,2,?,4,8} (? I0b/p11 I2a/p6)
+
+# B-Bus -- B address select on ALUs + data for other devices too
+->B-Bus<0:3>		uIWL<43:46>
+
 
 # iD-Bus - Internal Data Bus
 READ_CONST_: (EN_: UD3.5 -> UD5 -> UM6p18)
@@ -76,23 +79,65 @@ READ_iDB_NIBBLES?: (E1_/E2_: ?? -> UC{11,12}p{9,10}; Oe1_: ?? -> UC{11,12}p1; Oe
 ->iD-Bus<0:3>?		UC12 Q{?,1,?,?} p{?3,4,?5,?6}
 ->iD-Bus<4:7>?		UC12 Q{?,2,?,?} p{?3,4,?5,?6}
 
-READ_SYSBUS_DATA: (OE_: UD3.3 -> UD5 -> A{11,12}p11)
+READ_SYSBUS_DATA: (OE_: UD3.3 -> UD5 -> UA{11,12}p11)
 ->iD-Bus<0:3>		UA11 OUT{3-0} p{18,12,8,2}
 ->iD-Bus<4:7>		UA12 OUT{3-0} p{18,12,8,2}
 
-READ_SYSBUS_ADDR_MSB: (R_/OEb_: UD2.2 -> UD4 -> A6p7/UA7p19)
+READ_SYSBUS_ADDR_MSB: (R_/OEb_: UD2.2 -> UD4 -> UA6p7/UA7p19)
 ->iD-Bus<0:3>		UA6 OUT{0-3} p{3,6,10,13}
 ->iD-Bus<4:7>		UA7/UA8 HOW?
 
-READ_SYSBUS_ADDR_LSB: (R_: UD2.3 -> UD4 ->A{4,5}p7)
+READ_SYSBUS_ADDR_LSB: (R_: UD2.3 -> UD4 ->UA{4,5}p7)
 ->iD-Bus<0:3>		UA4 OUT{0-3} p{3,6,10,13}
 ->iD-Bus<4:7>		UA5 OUT{0-3} p{3,6,10,13}
 
 
-#F-Bus
+# F-Bus - Output from ALUs or MAPROM, toggled by H11_6 (LO=MAPROM/HI=ALUs)
+
+READ_ALU_RESULT: (OE_: UH11.6 -> INV -> UF{10,11}p40)
+->F-Bus<0:3>		UF10 (ALU0) Y{0-3} p{36-39}
+->F-Bus<4:7>		UF11 (ALU0) Y{0-3} p{36-39}
+
+READ_MAPROM: (E1: UH11.6 -> INV -> UB13p15)
+->F-Bus<0:7>		UB13 (MAPROM) D{0-7} p{6-9,11-14}
+
+WRITE_REG_SELECT (RIR): (E_: UE6.2 -> UE5 -> UC13p1)
+F-Bus<0:7>		UC13 D{0,3,2,?1,4-7} p{3,8,7,?4,13,14,17,18} (CONFIRM?)
+
+WRITE_D9: (E_: UE6.3 -> UE5 -> UD9p1)
+F-Bus<?0:5?>		UD9 D{?,?,?,?,?,1} p{?,?,?,?,?,4} ?D{0,2-5} ?p{3,6,11,13,14} (No idea)
+
+WRITE_PGTBL_BASE_ADDR: (E_: UE6.4 -> UE5 -> UD11p1)
+F-Bus<0:3>		UD11 ?D{0-2} ?p{3,4,6} (CONFIRM? MORE?)
+
+WRITE_SEQ_REG: (RE_: UE6.6 -> UE5 -> U{JK}7p1, ?UL9p3) (CONFIRM UL9p3 CONNECTS?)
+F-Bus<0:3>		UJ7 R{0-3} p{5-2}
+F-Bus<4:7>		UK7 R{0-3} p{5-2}
+uIWL<24:26>		UL9 D{0-2} p{7-5}
+
+WRITE_M12: (E_: UE6.7 -> UE5 -> M12p1)
+?F-Bus<?0:5?>		M12 ?D{0-5} ?p{3,4,6,11,13,14} (Need data!)
+
+WRITE_RESULT_LATCH: (E_: UE6.1 -> UE5 -> UC9p1)
+F-Bus<0:7>->		UC9 D{0-7} p{3,4,7,8,13,14,17,18} (CONFIRM?)
+
+# R-Bus - Output from transparent latch UC9 (Always on)
+->R-Bus<0:7>		UC9 Q{0-7} p{2,5,6,9,12,15,16,19} (CONFIRM?)
+
+WRITE_REGFILE: (WE_: UK11.4 -> ??H13Bp8(AND4) -> UK12C(NOR) -> UD{14,15}p20
+R-Bus<0:3>		UD?14 ?D{0-3} ?p{9,11,13,15} (DETERMINE SIGNALS AND ORDER)
+R-Bus<4:7>		UD?15 ?D{0-3} ?p{9,11,13,15} (DETERMINE SIGNALS AND ORDER)
+
+WRITE_SYSBUS_DATA: (DRCP_: UK11.7 -> UA{11,12}p19)
+R-Bus<0:3>		UA11 ?IN{3-0} p{17,13,7,3} (CONFIRM ORDER?)
+R-Bus<4:7>		UA12 ?IN{3-0} p{17,13,7,3} (CONFIRM ORDER?)
 
 
+SEL_STADDR_SRC_RBUS: (S=1: UE6.5 -> UE5 -> U[BC]{3,4}p1)
+SEL_STADDR_SRC_PC: (S=0: UE6.5 -> UE5 -> U[BC]{3,4}p1)
 
+WRITE_STADDR_MSB: (PE_: UH11.3 -> U[BC]5p9)
+WRITE_STADDR_LSB: (PE_: ?????? -> U[BC]3p9)
 
 
 # Target signals, multiple devices
