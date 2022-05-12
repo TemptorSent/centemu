@@ -177,7 +177,7 @@ enum decoder_outputs {
 	D_K11_4_WRITE_RF=0x38, D_K11_5=0x3a, D_K11_6=0x3c, D_K11_7_WRITE_BUS_SYS_DATA=0x3e,
 
 	D_H11_0=0x40, D_H11_1_READ_RR=0x42, D_H11_2=0x44, D_H11_3_WRITE_ALS_MSB=0x46,
-	D_H11_4=0x48, D_H11_5=0x4a, D_H11_6_READ_MAPROM=0x4c, D_H11_7_READ_ALU_RESULT=0x4d, D_H11_7=0x4e,
+	D_H11_4=0x48, D_H11_5=0x4a, D_H11_6_READ_MAPROM=0x4c, D_H11_6_READ_ALU_RESULT=0x4d, D_H11_7=0x4e,
 
 	D_E7_0=0x50, D_E7_1_UE14_CLK_EN=0x52, D_E7_2_WRITE_SR=0x54, D_E7_3=0x56,
 	D_E7_4_UNUSED=0x58, D_E7_5_UNUSED=0x5a, D_E7_6_UNUSED=0x5c, D_E7_7_UNUSED=0x5e
@@ -214,11 +214,13 @@ static char *decoded_sig[6][8][2] = {
 		{"E6.7 (Load Condition Code Reg M12?)",""} // M12p1
 	},
 	{ // Decoder K11
-		{"K11.0",""},
+	  	// WRITE REGFILE (K11.A0 NOR[UK12C] K11.A1) -> UD14.WE_/UD15.WE_
+		// REGFILE Write enabled for K11.0 or K11.4 outputs
+		{"K11.0 ??MODE?? (Write Register File) <- (R-Bus)",""},
 		{"K11.1",""},
 		{"K11.2 (M13 Gate?)",""},
 		{"K11.3 (F11 Enable)",""},
-		{"K11.4 (Write Register File?) <- (R-Bus)",""}, // Towards WRITE REGFILE K11.4 -> ?.H13Bp8 -> UD14.WE_/UD15.WE_
+		{"K11.4 ??MODE?? (Write Register File) <- (R-Bus)",""},
 		{"K11.5",""},
 		{"K11.6",""},
 		{"WRITE EXTERNAL DATA BUS REGISTER <- (R-Bus)",""}
@@ -429,7 +431,7 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 					st->ALU.OE_=1; 
 					deroach("Read 0x%02x from MAPROM address 0x%02x to F-Bus\n", st->Bus.F, st->Bus.iD);
 					break;
-				case D_H11_7_READ_ALU_RESULT:
+				case D_H11_6_READ_ALU_RESULT:
 					st->ALU.OE_=0;
 					deroach("Reading ALU Y outputs to F-Bus enabled\n");
 					break; 

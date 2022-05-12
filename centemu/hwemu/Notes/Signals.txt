@@ -124,7 +124,8 @@ F-Bus<0:7>->		UC9 D{0-7} p{3,4,7,8,13,14,17,18} (CONFIRM?)
 # R-Bus - Output from transparent latch UC9 (Always on)
 ->R-Bus<0:7>		UC9 Q{0-7} p{2,5,6,9,12,15,16,19} (CONFIRM?)
 
-WRITE_REGFILE: (WE_: UK11.4 -> ??H13Bp8(AND4) -> UK12C(NOR) -> UD{14,15}p20
+###WRITE_REGFILE: (WE_: UK11.4 -> ??H13Bp8(AND4) -> UK12C(NOR) -> UD{14,15}p20
+WRITE_REGFILE: (WE_: (UE3.7 -> UE5.5)[uIW<7>] (UJ3.0 -> UJ5.7)[uIW<8>] -> UK12C(NOR) [:UK11<0:1>=0] -> UD{14,15}p20
 R-Bus<0:3>		UD?14 ?D{0-3} ?p{9,11,13,15} (DETERMINE SIGNALS AND ORDER)
 R-Bus<4:7>		UD?15 ?D{0-3} ?p{9,11,13,15} (DETERMINE SIGNALS AND ORDER)
 
