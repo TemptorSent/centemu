@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
-#include "clockline.h"
-#include "logic-common.h"
+#include "../common/clockline.h"
+#include "../common/logic-common.h"
 
 enum am2909_source_code { uPC=0x0, AR=0x1, STK0=0x2, Di=0x3 };
 static char *am2901_source_mnemonics[4] = { "uPC", "AR", "STK0", "Di" };

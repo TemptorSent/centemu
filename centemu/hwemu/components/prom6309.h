@@ -1,5 +1,5 @@
-#include "rom-common.h"
-#include "logic-common.h"
+#include "../common/rom-common.h"
+#include "../common/logic-common.h"
 
 typedef struct prom6309_device_t {
 	char *filename;

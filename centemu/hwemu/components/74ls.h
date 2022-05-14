@@ -1,8 +1,8 @@
 #pragma once
 #include <stdint.h>
 #include <stdio.h>
-#include "logic-common.h"
-#include "clockline.h"
+#include "../common/logic-common.h"
+#include "../common/clockline.h"
 
 #define _74(part) logic_74 ## part
 #define d_74(part) logic_74 ## part (logic_74 ## part ## _device_t *dev)

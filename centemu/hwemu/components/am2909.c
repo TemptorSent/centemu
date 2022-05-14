@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include "am2909.h"
-#include "ginsumatic.h"
+#include "../common/ginsumatic.h"
 
 
 char *am2909_clock_edge_LH(am2909_device_t *dev) {

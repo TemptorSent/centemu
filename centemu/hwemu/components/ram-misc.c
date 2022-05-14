@@ -1,6 +1,6 @@
 #include <stdint.h>
-#include "logic-common.h"
-#include "clockline.h"
+#include "../common/logic-common.h"
+#include "../common/clockline.h"
 #include "ram-misc.h"
 
 /* 93l422 256x4-bit (1kbit) Static RAM w/ Tri-state outputs */

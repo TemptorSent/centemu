@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
-#include "logic-common.h"
-#include "clockline.h"
+#include "../common/logic-common.h"
+#include "../common/clockline.h"
 
 enum am2901_source_operand_code { AQ=00, AB=01, ZQ=02, ZB=03, ZA=04, DA=05, DQ=06, DZ=07 };
 static char am2901_source_operands[8][2] = { {'A','Q'},{'A','B'},{'0','Q'},{'0','B'},{'0','A'},{'D','A'},{'D','Q'},{'D','0'}};

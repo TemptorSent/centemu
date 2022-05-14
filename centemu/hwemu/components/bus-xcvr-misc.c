@@ -1,6 +1,6 @@
 #include <stdint.h>
-#include "logic-common.h"
-#include "clockline.h"
+#include "../common/logic-common.h"
+#include "../common/clockline.h"
 #include "bus-xcvr-misc.h"
 
 /* am2907 */

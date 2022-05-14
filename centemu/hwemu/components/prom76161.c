@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include "prom76161.h"
-#include "logic-common.h"
+#include "../common/logic-common.h"
 int prom76161_init(prom76161_device_t *dev, char *filename, uint16_t *A, uint8_t *D, bit_t *CE1_, bit_t *CE2, bit_t *CE3) {
 	int res;
 

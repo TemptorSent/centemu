@@ -1,5 +1,5 @@
 #include "prom6309.h"
-#include "logic-common.h"
+#include "../common/logic-common.h"
 int prom6309_init(prom6309_device_t *dev, char *filename, byte_t *A, byte_t *D, bit_t *CE1_, bit_t *CE2_) {
 	I_(A)=A;
 	I_(D)=D;

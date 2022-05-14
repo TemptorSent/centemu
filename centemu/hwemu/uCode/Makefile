@@ -3,17 +3,24 @@ CFLAGS = -Wall -Wno-unused -ggdb
 
 .PHONY: all
 
-all: romcat-uC
+all: uCemu
 
-romcat-uC: romcat-uC.o ../ginsumatic.o ../am2901.o ../am2909.o ../clockline.o ../rom-common.o
+uCemu: \
+	../common/ginsumatic.o \
+	../components/am2901.o \
+	../components/am2909.o \
+	../common/clockline.o \
+	../common/rom-common.o \
+	uCemu.o
 
-romcat-uC.o: comments_generated.h bootstrap_rom.h
-romcat-uC.c: comments_generated.h bootstrap_rom.h
+
+uCemu.o: comments_generated.h bootstrap_rom.h
+uCemu.c: comments_generated.h bootstrap_rom.h
 
 comments_generated.h: generate-comments.sh
 	$(SHELL) generate-comments.sh
 
 bootstrap_rom.h: rom2include
-	./rom2include ../../Bootstrap.rom bootstrap_rom  > bootstrap_rom.h
+	../tools/rom2include ../../Bootstrap.rom bootstrap_rom  > bootstrap_rom.h
 
-rom2include: rom2include.o
+rom2include: ../tools/rom2include.o

@@ -27,6 +27,9 @@
 ! p{3,6,10,13} (I1a-I1d) <- UC15 p14-p11 (Q0-Q3) CONFIRM ORDER
 ! p11 (I0c) <- UC13 p15(Q5) (or pos. p2(Q0)) CONFIRM
 
+#UD9 Output logic
+NAND3[UE10C](?,NOR[UD10D](UD9.Q4,UD9.Q5), NOR[UD10C](UC10C.Y,UD9.Q1)) -> UH14.I1
+UD9.Q5->UC14.I1b
 
 
 
@@ -41,6 +44,11 @@ CLK_? ->	I1b	-> CLK_UD6Zb "CEP_OAL"
 ? p3,p5,p10,p14,p15 (may be unused, tied high/low)
 
 
+# System Bus Signals
+T8			DRDY	UA2C.Y -> T8 -> UA3B.A
+T{9,10,12,17,22,23,24,25}	ABT_{?,?,13,14,15,16,17}	
+T13-T16		INR_		UA7.I{2a,1a,0a,3a}
+T18-T21		CIL_
 
 # Bus connections
 uABus<0:10>->		U[EFHJKLM]3 A0-A10 p{8,7,6,5,4,3,2,1,23,22,21}
@@ -147,7 +155,7 @@ WRITE_STADDR_LSB: (PE_: ?????? -> U[BC]3p9)
 CLK_H12In:
 	IN	+	SN74120		5,11	CP	UH12A/UH12B (Dual Pulse Sync/Driver)
 
-CLK_H12A: =CLK_H12In
+CLK_H12A: =CLK_H12In	"Clock.A"
 	Drive	+	SN74120		6	Y	UH12B (Dual Pulse Sync/Driver)
 		+	74LS10		2	B	UE10A (3-in NAND w/ CLK_UH12B)
 		+	74LS10		3	A	UE11B (3-in NAND)
@@ -155,20 +163,20 @@ CLK_UE11B: =~CLK_H12A
 	Drive	-	74LS10		6	Y	UE11B (3-in NAND)
 
 
-CLK_H12B: =CLK_H12In
+CLK_H12B: =CLK_H12In	"Clock.B"
 	Drive	+	SN74120		10	Y	UH12B (Dual Pulse Sync/Driver)
 		+	74LS10		13	C	UE10A (3-in NAND w/ CLK_UH12A)
 		+	74LS00		4,5	A,B	UK10B (NAND used as inverter)
 		+	74LS02		5,6	A,B	UE8B (NOR used as inverter)
 		+	74LS04		1	A	UJ6A (Inverter)
 
-CLK_UJ6A: =~CLK_H12B
+CLK_UJ6A: =~CLK_H12B	"Clock.B0_"
 	Drive	-	74LS04		2	Y	UJ6A (Inverter)
 		-LH	AM2909		27	CP	UJ7/UK7 (Sequencers)
 		-LH	AM2911		1	CP	UL9 (Sequencer)
 		-LH	74LS377		11	CP	UH5-UM5 (uIW Latch)
 
-CLK_UE8B: =~CLK_H12B
+CLK_UE8B: =~CLK_H12B	"Clock.B2_"
 	Drive	-	74LS02		4	Y	UE8B (NOR used as inverter)
 		-	74LS02		2	A	UE8A (NOR UE7_1p14)
 		-LH	74LS174		9	Cp	UE5,UD4,UD5 (iIW Decoder Latches)
@@ -178,7 +186,7 @@ CLK_UE8B: =~CLK_H12B
 		-LH	74LS173		7	Cp	UC11/UC12 ()
 		-LH	74LS377		11	CP	UC13 (Register Select - RIR)
 
-CLK_UK10B: =~CLK_H12B
+CLK_UK10B: =~CLK_H12B	"Clock.B1_"
 	Drive	-	74LS00		6	Y	UK10B (NAND used as inverter)
 		--	74LS138		4,5	E1_,E2_	UK11 (Decoder)
 		-LH	74LS378		9	C	UJ9 (Latch)

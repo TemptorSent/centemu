@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
-#include "logic-common.h"
-#include "clockline.h"
+#include "../common/logic-common.h"
+#include "../common/clockline.h"
 #include "74ls.h"
 
 

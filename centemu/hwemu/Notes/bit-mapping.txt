@@ -6,7 +6,7 @@ x x x SH.0 r05 r05 RAM A.XOR.B DATA DATA DATA
            K         F           H          L         M           J         E
      52   48   44   40    36    32    28   24   20   16     12    8    4    0
 0 1 0 00 0101 0101 011 110 001 1 00 00 11 000 1011 0111 1 00 000 011 100 0000
- EN   sh A    B    876 543 210 C S2 S0 PP  addr-next      e7 h11 k11 e6  d3
+ EN H sh A    B    876 543 210 C S2 S0 PP  addr-next      e7 h11 k11 e6  d3
  S11                             S1              data
 
 

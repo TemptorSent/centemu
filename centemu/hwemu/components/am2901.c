@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "logic-common.h"
+#include "../common/logic-common.h"
 #include "am2901.h"
 
 uint8_t am2901_read_Rmux(am2901_device_t *dev) {
@@ -169,11 +169,6 @@ char *am2901_clock_state_edge_HL(am2901_device_t *dev) {
 }
 
 
-char *am2901_clock_state_hold_L(am2901_device_t *dev){
-	return(0);
-
-}
-
 char *am2901_clock_state_setup_L(am2901_device_t *dev){
 	/* Decode source operands portion of instruction */
 	am2901_source_operand_decode(dev);
@@ -193,26 +188,13 @@ char *am2901_clock_state_edge_LH(am2901_device_t *dev) {
 
 }
 
-char *am2901_clock_state_hold_H(am2901_device_t *dev){
-	return(0);
-
-}
-
 char *am2901_update(am2901_device_t *dev) {
 	//printf("clk=%s\n",CLOCK_STATE_NAME_FULL(*(dev->clk)));
 	switch(*(dev->clk)) {
-		case CLK_LO:
-			am2901_clock_state_hold_L(dev);
-			am2901_clock_state_setup_L(dev);
-			break;
-		case CLK_LH:
-			am2901_clock_state_edge_LH(dev); break;
-		case CLK_HI:
-			am2901_clock_state_hold_H(dev);
-			am2901_clock_state_setup_H(dev);
-			break;
-		case CLK_HL:
-			am2901_clock_state_edge_HL(dev); break;
+		case CLK_HL: am2901_clock_state_edge_HL(dev); break;
+		case CLK_LO: am2901_clock_state_setup_L(dev); break;
+		case CLK_LH: am2901_clock_state_edge_LH(dev); break;
+		case CLK_HI: am2901_clock_state_setup_H(dev); break;
 		default:
 			printf("Unknown clock state: %0x", S_(clk)); break;
 	}
@@ -442,10 +424,27 @@ int am2901_init(am2901_device_t *dev, char* id,
 	defS_(OE_);
 
 	/* Clear internal state */
-	I_(Q)=0;
 	I_(F)=0;
+	/* Zero A & B registers */
 	I_(A)=0;
 	I_(B)=0;
+	/* Zero Q register and clear it's input enable */
+	I_(Q)=0;
+	I_(Q_EN)=0;
+	/* Initilize Rmux & Smux */
+	I_(Rmux)='A';
+	I_(Smux)='A';
+	/* Initilize RAM shifter */
+	I_(RAM0_DIR)='Z';
+	I_(RAM3_DIR)='Z';
+	I_(RAMmux)='N';
+	/* Initilize Q Shifter */
+	I_(Q0_DIR)='Z';
+	I_(Q3_DIR)='Z';
+	I_(Qmux)='N';
+	/* Initilize Ymux */
+	I_(Ymux)='F';
+
 	for(int r=0; r<16; r++) {
 		dev->RAM[r]=0;
 	}

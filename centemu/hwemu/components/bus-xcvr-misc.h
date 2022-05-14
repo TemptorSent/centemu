@@ -1,6 +1,6 @@
 #include <stdint.h>
-#include "logic-common.h"
-#include "clockline.h"
+#include "../common/logic-common.h"
+#include "../common/clockline.h"
 
 /* am2907 Quad Bus Transceivers with Interface Logic D-type driver with open-collector bus driver output */
 struct logic_am2907_device_t {
