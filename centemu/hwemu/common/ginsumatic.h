@@ -8,8 +8,8 @@
 //#define deroach(...) ; //printf(__VA_ARGS__);
 
 /* Utility functions to extract ranges of bits, with _R reversing the bit order returned */
-#define BITRANGE(d,s,n) ((d>>s) & ((1LL<<(n))-1LL) )
-#define BITRANGE_R(d,s,n) (bitreverse_64(BITRANGE(d,s,n)) >>(64-n))
+#define BITRANGE(d,s,n) (((d)>>(s)) & ((1LL<<(n))-1LL) )
+#define BITRANGE_R(d,s,n) (bitreverse_64(BITRANGE(d,s,n)) >>(64-(n)))
 
 /* Extract a bit from a larger type */
 void bit_of_a_twobit( bit_t *dest, twobit_t *src, bit_t bit);

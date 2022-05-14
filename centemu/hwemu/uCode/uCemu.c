@@ -9,9 +9,6 @@
 #include "../common/rom-common.h"
 #include "./bootstrap_rom.h"
 
-/* Utility functions to extract ranges of bits, with _R reversing the bit order returned */
-#define BITRANGE(d,s,n) ((d>>s) & ((1LL<<(n))-1LL) )
-#define BITRANGE_R(d,s,n) (bitreverse_64(BITRANGE(d,s,n)) >>(64-n))
 
 #include "comments_generated.h"
 
@@ -97,7 +94,6 @@ typedef struct cpu_state_t {
 
 	struct Bus {
 		word_t ADDR; /* Internal Address bus */
-		byte_t B; /* Bus used primarily for ALU B address select, used elswhere also */
 		byte_t DP; /* Internal Data bus (DataPath) */
 		byte_t F; /* Primarily output of ALU result F, also used for MAPROM output */
 		byte_t R; /* Result bus, latched output of Bus.F */
@@ -156,7 +152,7 @@ typedef struct cpu_state_t {
 typedef struct uIW_t {
 	bit_t S1S1_OVR_;
 	twobit_t SHCS;
-	nibble_t A,B;
+	nibble_t LA,LB;
 	octal_t I876, I543, I210;
 	bit_t CASE_;
 	twobit_t S0S, S1S, S2S;
@@ -164,6 +160,9 @@ typedef struct uIW_t {
 	word_t uADDR;
 	byte_t DATA_;
 	octal_t D_E6,D_E7,D_H11,D_K11;
+	octal_t M_UJ10_S210, M_UK9_S210;
+	twobit_t M_UJ11_S10, M_UJ12_S10, M_UJ13_S10, M_UK13_S10;
+	bit_t M_UJ10_E_, M_UJ11_E_, M_UK9_E_;
 	nibble_t D_D2D3;
 } uIW_t;
 
@@ -188,7 +187,7 @@ typedef struct uIW_trace_t {
 
 enum decoder_enum { D_D2, D_D3, D_E6, D_K11, D_H11, D_E7 };
 enum decoder_outputs {
-	D_D2_0_READ_NSWAPR=0x00, D_D2_0_WRITE_NSWAPR=0x01,
+	D_D2_0_READ_NSWAPR=0x00,/* D_D2_0_WRITE_NSWAPR=0x01,*/
 	D_D2_1_READ_REG=0x02,
 	D_D2_2_READ_BUS_SYS_ADDR_MSB=0x04, D_D2_3_READ_BUS_SYS_ADDR_LSB=0x06,
 
@@ -202,16 +201,16 @@ enum decoder_outputs {
 	D_K11_4=0x38, D_K11_5=0x3a, D_K11_6_WrCLK_WAR_LSB=0x3c, D_K11_7_WrCLK_BUS_SYS_DATA=0x3e,
 
 	D_H11_0=0x40, D_H11_1=0x42, D_H11_2=0x44, D_H11_3_WRITE_WAR_MSB=0x46,
-	D_H11_4=0x48, D_H11_5=0x4a, D_H11_6_READ_MAPROM=0x4c, D_H11_6_READ_ALU_RESULT=0x4d, D_H11_7=0x4e,
+	D_H11_4=0x48, D_H11_5=0x4a, D_H11_6_READ_MAPROM=0x4c, D_H11_6_READ_ALU_RESULT=0x4d, D_H11_7_WRITE_NSWAPR=0x4e,
 
-	D_E7_0=0x50, D_E7_1_UE14_CLK_EN=0x52, D_E7_2_WRITE_SR=0x54, D_E7_3=0x56,
+	D_E7_0=0x50, D_E7_1_UE14_CLK_EN=0x52, D_E7_2_WRITE_FLR=0x54, D_E7_3=0x56,
 	D_E7_4_UNUSED=0x58, D_E7_5_UNUSED=0x5a, D_E7_6_UNUSED=0x5c, D_E7_7_UNUSED=0x5e
 };
 
 
 static char *decoded_sig[6][8][2] = {
 	{ // Decoder D2 -> latch UD4
-		{"D2.0 READ NIBBLE SWAP REGISTER -> (DP-Bus)","D2.0 WRITE NIBBLE SWAP REGISTER"}, // C12p1
+		{"D2.0 READ NIBBLE SWAP REGISTER -> (DP-Bus)",""}, // C12p1
 		{"D2.1 READ REGISTER FILE -> (DP-Bus)",""}, // D13p1
 		{"D2.2 READ ADDRESS BUS MSB (A-Bus) -> (DP-Bus)",""}, // A6p7
 		{"D2.3 READ ADDRESS BUS LSB (A-Bus)-> (DP-Bus)",""}, // A4p7
@@ -249,8 +248,8 @@ static char *decoded_sig[6][8][2] = {
 		{"K11.3 (F11 Enable)",""},
 		{"K11.4 (Unknown Clock Selected)",""},
 		{"K11.5 ENABLE CLOCK TO WRITE WORKING ADDRESS REGISER LSB (Clock.WrR_WAR)",""},
-		{"K11.6 ENABLE CLOCK TO READ SYSTEM DATA BUS LATCH (Clock.RdL_SysDB)",""},
-		{"K11.5 ENABLE CLOCK TO WRITE SYSTEM DATA BUS REGISTER <- (R-Bus) (Clock.WrR_SysDB)",""}
+		{"K11.6 ENABLE CLOCK TO READ SYSTEM DATA BUS RECEIVE LATCH (Clock.RdL_SysDB)",""},
+		{"K11.5 ENABLE CLOCK TO WRITE SYSTEM DATA BUS OUTPUT REGISTER <- (R-Bus) (Clock.WrR_SysDB)",""}
 	},
 	{ // Decoder H11
 		{"H11.0",""},
@@ -260,12 +259,12 @@ static char *decoded_sig[6][8][2] = {
 		{"H11.4",""},
 		{"H11.5",""},
 		{"H11.6 READ MAPPING PROM -> (F-Bus)","H11.6 READ ALU RESULT -> (F-Bus)"},
-		{"H11.7",""}
+		{"H11.7 WRITE NIBBLE SWAP REGISTER <- (DP-Bus) (NSWAPR)",""}
 	},
 	{ // Decoder E7
 		{"E7.0",""},
 		{"E7.1 (E14 Clock enable?)",""},
-		{"E7.2 WRITE STATUS REGISTER",""},
+		{"E7.2 WRITE FLAG REGISTER",""},
 		{"E7.3",""},
 		{"",""},
 		{"",""},
@@ -284,6 +283,90 @@ static char *carry_ops[4]= {
 	"?0->Cin", "?1->Cin", "?C->Cin", "?->Cin"
 };
 
+
+
+/* E_: uADDR<5>; S{2:0}=uADDR<8?:6> */
+static char *UJ10_Sources[8] = {
+	"UJ10.I0 (=UK13.I1a, UK10C.[AB])",
+	"UJ10.I1 UK10C.Y ( =INV(UJ10.I0) )",
+	"UJ10.I2 Link Flag? (Carry)",
+	"UJ10.I3",
+	"UJ10.I4 R-Bus<3> or R-Bus<7>",
+	"UJ10.I5 ALU.RAM7 (Shifter DownLine)",
+	"UJ10.I6 ALU.RAM0",
+	"UJ10.I7 ALU.Q0 (Shifter UpLine)",
+};
+
+/* E_: uADDR<2>; S<1:0>=uADDR<4:3>,S2=Flag_M(UJ9.Q2) */
+static char *UJ11_Sources[8] = {
+	"UJ11.I0 (=I4?)",
+	"UJ11.I1",
+	"UJ11.I2 UM12p7?",
+	"UJ11.I3",
+	"UJ11.I4 (=I0?)",
+	"UJ11.I5",
+	"UJ11.I6", 
+	"UJ11.I7",
+};
+
+/* Ea_= ???, Eb_= ???; S<1:0>=uADDR<1:0> */
+static char *UJ12a_Sources[4] = {
+	"UJ12.I0a",
+	"UJ12.I1a",
+	"UJ12.I2a R-Bus<1> or R-Bus<5>",
+	"UJ13.I3a Result F7 =? 1 (Sign: FLAG_M)",
+};
+
+static char *UJ12b_Sources[4] = {
+	"UJ12.I0b",
+	"UJ12.I1a Result F =? 0 (Zero; FLAG_V)",
+	"UJ12.I2b",
+	"UJ12.I3b UK10p11",
+};
+
+/* Ea_=Eb_= CASE_; S<1:0>=uADDR<5:4> */
+static char *UJ13a_Sources[4] = {
+	"UJ13.I0a",
+	"UJ13.I1a",
+	"UJ13.I2a",
+	"UJ13.I3a"
+};
+static char *UJ13b_Sources[4] = {
+	"UJ13.I0a Result F =? 0 (Zero; FLAG_V)",
+	"UJ13.I1b",
+	"UJ13.I2b UB12p1",
+	"UJ13.I3b",
+};
+
+/* E_: uIW.LA<0>; S{0,1,2}=uADDR<0:2> */
+static char *UK9_Sources[8] = {
+	"UK9.I0",
+	"UK9.I1",
+	"UK9.I2",
+	"UK9.I3",
+	"UK9.I4",
+	"UK9.I5",
+	"UK9.I6",
+	"UK9.I7",
+};
+
+
+/* Ea_=Eb_= CASE_; S<1:0>=uADDR<7:6> */
+static char *UK13a_Sources[4] = {
+	"UK13.I0a UM12p10",
+	"UK13.I1a (=UJ10.I0, UK10C.[AB])",
+	"UK13.I2a",
+	"UK13.I3a"
+};
+static char *UK13b_Sources[4] = {
+	"UK13.I0a",
+	"UK13.I1b",
+	"UK13.I2b UK10D.Y",
+	"UK13.I3b",
+};
+
+
+
 int read_roms() {
 	int r;
 	for(int i=0; i<NUMROMS; i++) {
@@ -292,51 +375,17 @@ int read_roms() {
 	}
 	r=rom_read_file(MAPROM_file, MAPROMSIZE, maprom);
 	return(r);
-/*
-	FILE *fp;
-	size_t ret_code;
-
-	for(int  i=0; i<NUMROMS; i++) {
-		fp=fopen(ROM_files[i],"rb");
-		ret_code=fread(allrom[i],1,ROMSIZE,fp);
-		if(ret_code != ROMSIZE) {
-			if(feof(fp)) {
-				printf("Unexpected EOF while reading %s: Only got %u byte of an expected %s.\n",
-					ROM_files[i], ret_code, ROMSIZE);
-			} else if(ferror(fp)){
-				printf("Failed while reading %s!\n",ROM_files[i]);
-			}
-			fclose(fp);
-			return(-1);
-		}
-		fclose(fp);
-
-		//printf("firstval: %x\n",allrom[i][0]);
-	}
-	return((int)ret_code);
-*/
 }
 
 int merge_roms() {
 	uint64_t iw;
 	for(int i=0; i<ROMSIZE; i++) {
-		//printf("\n%04x",i);
 		for(int j=0; j<NUMROMS; j++) {
 			mergedrom[i][j]=allrom[j][i];
-			//printf(" %02x",mergedrom[i][j]);
 		}
 		iw=concat_bytes_64(NUMROMS,mergedrom[i]);
 		iws[i]=iw;
-		/*
-		printf("\tI:%03o A':%x A:%x  %#018"PRIx64"",
-			BITRANGE(iw,34,9),
-			BITRANGE(iw,44,4),
-			BITRANGE_R(iw,44,4),
-			iw
-		);
-		*/
 	}
-
 	return(ROMSIZE);
 }
 
@@ -371,8 +420,8 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 
 	uIW->S1S1_OVR_=BITRANGE(in,54,1); /* Override bit1=1 of S1S when LO, otherwise S1S=S2S */
 	uIW->SHCS=BITRANGE(in,51,2); /* Shifter/Carry Control Select */
-	uIW->A=BITRANGE(in,47,4); /* ALU A Address (Source) */
-	uIW->B=BITRANGE(in,43,4); /* ALU B Address (Source/Dest) */
+	uIW->LA=BITRANGE(in,47,4); /* ALU A Address/Logic Bus (Source) */
+	uIW->LB=BITRANGE(in,43,4); /* ALU B Address/Logic Bus (Source/Dest) */
 	uIW->I876=BITRANGE(in,40,3); /* ALU I876 - Destination Control */
 	uIW->I543=BITRANGE(in,37,3); /* ALU I543 - Operation */
 	uIW->I210=BITRANGE(in,34,3); /* ALU I210 - Operand Source Select */
@@ -383,6 +432,21 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 	uIW->FE_=BITRANGE(in,27,1); /* Sequencers (Push/Pop) File Enable (Active LO) */
 	uIW->uADDR=BITRANGE(in,16,11); /* uC Address (11bits, lower 8 multiplex with DATA_) */
 	uIW->DATA_=BITRANGE(in,16,8); /* Data (inverted) (=low 8 bits of uC Address) */
+
+	/* Conditional MUX controls mostly overlap with uADDR range */
+	uIW->M_UJ10_S210=BITRANGE(in,16+6,3); /* MUX UJ10 Source Select */
+	uIW->M_UJ10_E_=BITRANGE(in,16+5,1); /* MUX UJ10 Enable */
+	uIW->M_UJ11_S10=BITRANGE(in,16+3,2); /* MUX UJ11 Source Select S0/S1 - Dynamic: S2=Flag_M(UJ9.Q2) */
+	uIW->M_UJ11_E_=BITRANGE(in,16+2,1); /* MUX UJ11 Enable */
+	uIW->M_UJ12_S10=BITRANGE(in,16+0,2); /* MUX UJ12 Source Select */
+	uIW->M_UJ13_S10=BITRANGE(in,16+4,2); /* MUX UJ13 Source Select */
+	uIW->M_UK9_S210=BITRANGE(in,16+0,3); /* MUX K9 Source Select */
+	uIW->M_UK9_E_=BITRANGE(in,47+0,1); /* MUX UK9 Enable: =LA<0> */
+	uIW->M_UK13_S10=BITRANGE(in,16+6,2); /* MUX UK13 Source Select */
+
+
+
+
 	//uIW->??/=BITRANGE(in,15,1); /* MUX UK9p7 */
 	uIW->D_E7=BITRANGE(in,13,2); /* Decoder UE7 */
 	uIW->D_H11=BITRANGE(in,10,3); /* Decoder UH11 */
@@ -397,6 +461,57 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 	/* S1S =    NAND( INV(S2S1),                 S1S1_OVR_<<1       ) OR     S1S0 */
 	uIW->S1S= ( (~( ((~uIW->S2S)&0x2) & (uIW->S1S1_OVR_<<1) ))&0x2) | ((uIW->S2S)&0x1) ;
 	
+}
+
+void do_conditionals(cpu_state_t *st, uIW_trace_t *t) {
+	byte_t tb;
+	nibble_t tn;
+
+	/* MUX UJ10 */
+	if(!t->uIW.M_UJ10_E_) {
+		tb=(t->uIW.M_UJ10_S210);
+		deroach("UJ10 Enabled, S=%0x: %s\n",tb,UJ10_Sources[tb]);
+	}
+
+	/* MUX UJ11 */
+	if(!t->uIW.M_UJ11_E_) {
+		tb=(t->uIW.M_UJ11_S10 | (st->Reg.FLR&0x4));
+		deroach("UJ11 Enabled, S=%0x: %s\n",tb,UJ11_Sources[tb]);
+	}
+
+	/* MUX UJ12 Enables unknown */
+	if(0) {
+		tn=(!t->uIW.M_UJ12_S10);
+		deroach("UJ12a Enabled, S=%0x: %s\n",tn,UJ12a_Sources[tn]);
+	}
+	if(0) {
+		tn=(!t->uIW.M_UJ12_S10);
+		deroach("UJ12b Enabled, S=%0x: %s\n",tn,UJ12b_Sources[tn]);
+	}
+
+
+	/* MUX UJ13 Enables common: CASE_ */
+	if(!t->uIW.CASE_) {
+		tn=(t->uIW.M_UJ13_S10);
+		deroach("UJ13a Enabled, S=%0x: %s\n",tn,UJ13a_Sources[tn]);
+		deroach("UJ13b Enabled, S=%0x: %s\n",tn,UJ13b_Sources[tn]);
+	}
+
+
+	/* MUX UK9 */
+	if(!t->uIW.M_UK9_E_) {
+		tb=(t->uIW.M_UK9_S210);
+		deroach("UK9 Enabled, S=%0x: %s\n",tb,UK9_Sources[tb]);
+	}
+
+
+	/* MUX UK13 Enables common: CASE_ */
+	if(!t->uIW.CASE_) {
+		tn=(t->uIW.M_UK13_S10);
+		deroach("UK13a Enabled, S=%0x: %s\n",tn,UK13a_Sources[tn]);
+		deroach("UK13b Enabled, S=%0x: %s\n",tn,UK13b_Sources[tn]);
+	}
+
 }
 
 
@@ -497,10 +612,6 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 			e= (i<<4) | (j<<1) | ( (v&(1<<j))? 1:0);
 			//deroach(" 0x%2x",e);
 			switch(e) {
-				case D_D2_0_WRITE_NSWAPR:
-					st->Reg.NSWAPR= ( (st->Bus.DP&0xf0)>>4) | ( (st->Bus.DP&0x0f)<<4);
-					deroach("Wrote 0x%02x to Nibble Swap Register from DP-Bus\n", st->Reg.NSWAPR);
-					break;
 				case D_E6_1_WRITE_RR:
 					st->Reg.RR=st->Bus.F;
 					st->Bus.R=st->Bus.F;
@@ -537,8 +648,8 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 					deroach("Clock to S_ input of flip-flop UL13A\n");
 					break;
 				case D_K11_3_WrCLK_F11_ENABLE: {
-					bit_t D=t->uIW.B&0x1;
-					octal_t A=(t->uIW.B&0xe)>>1;
+					bit_t D=t->uIW.LB&0x1;
+					octal_t A=(t->uIW.LB&0xe)>>1;
 					st->Reg.LUF11= ( st->Reg.LUF11 & (~(1<<A)&0xff) ) | (D<<A);
 					deroach("UF11 latched bit %0x=%0x, now contains 0x%02x\n", A, D, st->Reg.LUF11);
 					}; break;
@@ -554,8 +665,20 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 					deroach("Wrote 0x%02x to MSB of Working Address Register, now holds 0x%04x (WAR)\n",
 						st->Bus.DP, st->Reg.WAR);
 					break;
-				case D_E7_2_WRITE_SR:
-					deroach("This would write the Status Register if we had it setup\n");
+				case D_H11_7_WRITE_NSWAPR:
+					st->Reg.NSWAPR= ( (st->Bus.DP&0xf0)>>4) | ( (st->Bus.DP&0x0f)<<4);
+					deroach("Wrote 0x%02x to Nibble Swap Register from DP-Bus\n", st->Reg.NSWAPR);
+					break;
+				case D_E7_2_WRITE_FLR:
+					st->Reg.FLR= (
+						( (st->ALU.FZ & 0x1)	<<0) |
+						( (st->ALU.F7 & 0x1)	<<1) |
+						( (st->ALU.OVF & 0x1)	<<2) |
+						( (st->ALU.Cout & 0x1)	<<3) |
+						( (st->ALU.Chalf & 0x1)	<<4) |
+						( (/* Unknown */ 0&0x1) <<5)
+					);
+					deroach("Wrote 0x%02x to Flag Register (FLR)\n", st->Reg.FLR);
 					break;
 
 				default: break;
@@ -574,7 +697,7 @@ void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 	st->Seq.Cn=1; // Always Increment
 
 
-	/* Transfer inputs from microinstruction word to ALU inputs - this could be done with pointer mods instead? */
+	/* Transfer inputs from microinstruction word to Seq inputs - this could be done with pointer mods instead? */
 	st->Seq.S0S= (~t->uIW.S0S)&0x3; // Seq0 Source for next uA
 	st->Seq.S1S= (~t->uIW.S1S)&0x3; // Seq1 Source for next uA
 	st->Seq.S2S= (~t->uIW.S2S)&0x3; // Seq2 Source for next uA
@@ -610,8 +733,8 @@ void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 	
 	/* Transfer inputs from microinstruction word to ALU inputs - this could be done with pointer mods instead? */
-	st->ALU.ADDR_A= t->uIW.A&0xf;
-	st->ALU.ADDR_B= t->uIW.B&0xf;
+	st->ALU.ADDR_A= t->uIW.LA&0xf;
+	st->ALU.ADDR_B= t->uIW.LB&0xf;
 	st->ALU.I876= ((octal_t)t->uIW.I876)&0x7;
 	st->ALU.I543= ((octal_t)t->uIW.I543)&0x7;
 	st->ALU.I210= ((octal_t)t->uIW.I210)&0x7;
@@ -764,6 +887,9 @@ void trace_uIW(cpu_state_t *st, uIW_trace_t *t, uint16_t addr, uint64_t in) {
 		t->F= st->Bus.F;
 		t->DP=st->Bus.DP;
 
+		deroach("\nUpdating conditional:\n");
+		do_conditionals(st,t);
+
 		st->Bus.R= st->Reg.RR;
 		deroach("\nUpdated R-Bus from Result Register: 0x%02x\n", st->Bus.R);
 
@@ -907,8 +1033,8 @@ void print_uIW_trace(uIW_trace_t *t) {
 	printf("Conditoinal: %s\n",t->uIW.CASE_?"No":"Yes");
 	printf("DP-Bus: 0x%02x\n", t->DP);
 	printf("ALUs: A=0x%01x B=0x%01x RS=%s %s -> %s\n",
-		t->uIW.A,
-		t->uIW.B,
+		t->uIW.LA,
+		t->uIW.LB,
 		am2901_source_operand_mnemonics[t->uIW.I210],
 		am2901_function_symbol[t->uIW.I543],
 		am2901_destination_mnemonics[t->uIW.I876]
