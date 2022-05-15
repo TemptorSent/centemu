@@ -175,6 +175,7 @@ typedef struct uIW_t {
 	/* Decoders */
 	nibble_t D_D2D3;
 	octal_t D_E6, D_E7, D_H11, D_K11;
+
 	/* Decoder Enables */
 	bit_t D_E7_E3;
 	
@@ -445,7 +446,7 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 
 
 
-	uIW->D_E7_E3=BITRANGE(in,15,1); /* E7 Active HI Enable???    (MUX UK9p7) */
+	//uIW->???=BITRANGE(in,15,1); /*  (MUX UK9p7) */
 	uIW->D_E7=BITRANGE(in,13,2); /* Decoder UE7 */
 	uIW->D_H11=BITRANGE(in,10,3); /* Decoder UH11 */
 	//uIW->NAND4_H13B_C=BITRANGE(in,9,1); /* Quad NAND Gate input C of UH13Bp12 */
@@ -491,7 +492,7 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 	uIW->K11_Out= ~( 1<<(uIW->D_K11) )&0xff;
 	uIW->H11_Out= ~( 1<<(uIW->D_H11) )&0xff;
 	/* From Latches UJ5 & UH5 */
-	uIW->E7_Out= ~( (uIW->D_E7_E3? 1:0)<<(uIW->D_E7) )&0x0f;
+	uIW->E7_Out= ~( 1<<(uIW->D_E7) )&0x0f;
 	
 
 
