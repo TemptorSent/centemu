@@ -6,43 +6,34 @@
 #include "../common/ginsumatic.h"
 #include "../components/am2901.h"
 #include "../components/am2909.h"
-#include "../common/rom-common.h"
+//#include "../common/rom-common.h"
 
 
-#include "./include/uCode_rom.h"
-#include "./include/maprom_rom.h"
-#include "./include/bootstrap_rom.h"
 
-#include "./include/comments_generated.h"
 
 // Inject bytes into system databus reads
 char **inject;
 byte_t inject_size;
 byte_t inject_pos;
 
-/* Microcode ROMs */
-//#define NUMROMS 7
-#define ROMSIZE 2048
+/* Microcode ROMs *
+ *	"./ROMs/CPU_UM3_MWE3.11_M3.11.rom",	// MC<8:0>  ; uIW<55:48>
+ *	"./ROMS/CPU_UJ3_MWJ3.11_F3.11.rom",	// MC<31:24>; uIW<47:40>
+ *	"./ROMS/CPU_UE3_MWM3.11_E3.11.rom",	// MC<55:48>; uIW<39:32>
+ *	"./ROMS/CPU_UF3_MWL3.11_D3.11.rom",	// MC<47:40>; uIW<31:24>
+ *	"./ROMS/CPU_UK3_MWH3.11_C3.11.rom",	// MC<23:16>; uIW<23:16>
+ *	"./ROMS/CPU_UL3_MWF3.11_B3.11.rom",	// MC<15:8> ; uIW<15:8>
+ *	"./ROMS/CPU_UH3_MWK3.11_A3.11.rom"	// MC<39:32>; uIW<7:0>
+ */
+#include "./include/uCode_rom.h"
+/* Comments for above by address */
+#include "./include/comments_generated.h"
 
-//static uint8_t allrom[NUMROMS][ROMSIZE];
-//static uint8_t mergedrom[ROMSIZE][NUMROMS];
-//static uint64_t iws[ROMSIZE];
-/*
-static char *ROM_files[NUMROMS] = {
-	"./ROMs/CPU_UM3_MWE3.11_M3.11.rom",	// MC<8:0>; uIW<55:48>
-	"./ROMS/CPU_UJ3_MWJ3.11_F3.11.rom",	// MC<31:24>; uIW<47:40>
-	"./ROMS/CPU_UE3_MWM3.11_E3.11.rom",	// MC<55:48>; uIW<39:32>
-	"./ROMS/CPU_UF3_MWL3.11_D3.11.rom",	// MC<47:40>; uIW<31:24>
-	"./ROMS/CPU_UK3_MWH3.11_C3.11.rom",	// MC<23:16>; uIW<23:16>
-	"./ROMS/CPU_UL3_MWF3.11_B3.11.rom",	// MC<15:8>; uIW<15:8>
-	"./ROMS/CPU_UH3_MWK3.11_A3.11.rom"	// MC<39:32>; uIW<7:0>
-};
-*/
+/* ISA OpCode to Microcode offset MAPROM */
+#include "./include/maprom_rom.h"
 
-/* ISA Entry point offset MAPROM */
-//#define MAPROMSIZE 0x100
-//uint8_t maprom[MAPROMSIZE];
-//static char *MAPROM_file = "./ROMs/CPU_UB13_MAPROM_6309.rom";
+/* System Bootstrap ROM */
+#include "./include/bootstrap_rom.h"
 
 
 /* Structure for storing our machine state */
@@ -96,6 +87,7 @@ typedef struct cpu_state_t {
 		bit_t OE_; // Enable outputs when LO, HiZ when HI
 	} Seq;
 
+
 	struct Bus {
 		word_t ADDR; /* Internal Address bus */
 		byte_t DP; /* Internal Data bus (DataPath) */
@@ -147,6 +139,7 @@ typedef struct cpu_state_t {
 		byte_t LUF11; // Addressable latch UF11 - Controls EI_/DI, ExtADB_EN, etc.
 	} Reg;
 
+
 	struct IO {
 		byte_t DIPSW;
 	} IO;
@@ -154,20 +147,44 @@ typedef struct cpu_state_t {
 
 
 typedef struct uIW_t {
-	bit_t S1S1_OVR_;
+	/* Micro Address of this instruction word */
+	word_t address;
+
+	/* Shifter/Carry */
 	twobit_t SHCS;
+	octal_t S_Shift;
+	twobit_t S_Carry;
+
+	/* ALUs */
 	nibble_t LA,LB;
 	octal_t I876, I543, I210;
 	bit_t CASE_;
+
+	/* Sequencers */
 	twobit_t S0S, S1S, S2S;
+	bit_t S1S1_OVR_;
 	bit_t PUP, FE_;
+	nibble_t Seq0Op, Seq1Op, Seq2Op;
+
+	/* Micro Address word */
 	word_t uADDR;
+
+	/* Inverted DATA_ */
 	byte_t DATA_;
-	octal_t D_E6,D_E7,D_H11,D_K11;
+
+	/* Decoders */
+	nibble_t D_D2D3;
+	octal_t D_E6, D_E7, D_H11, D_K11;
+	/* Decoder Enables */
+	bit_t D_E7_E3;
+	
+	nibble_t D2_Out;
+	sixbit_t D3_Out, E6_Out, K11_Out, H11_Out, E7_Out;
+
+	/* MUXes */
 	octal_t M_UJ10_S210, M_UK9_S210;
 	twobit_t M_UJ11_S10, M_UJ12_S10, M_UJ13_S10, M_UK13_S10;
 	bit_t M_UJ10_E_, M_UJ11_E_, M_UK9_E_;
-	nibble_t D_D2D3;
 } uIW_t;
 
 
@@ -175,12 +192,7 @@ typedef struct uIW_trace_t {
 	word_t uADDR_Prev;
 	word_t uADDR;
 	word_t uADDR_Next;
-	uIW_t uIW;
-	nibble_t Seq0Op, Seq1Op, Seq2Op;
-	nibble_t D2_Out;
-	sixbit_t D3_Out, E6_Out, K11_Out, H11_Out, E7_Out;
-	octal_t S_Shift;
-	twobit_t S_Carry;
+	uIW_t *uIW;
 	byte_t DP;
 	byte_t F;
 	byte_t R;
@@ -247,7 +259,8 @@ static char *decoded_sig[6][8][2] = {
 		// WRITE_RF logic tied to input signals of K11
 		{"K11.0 Write Register File <- (R-Bus)",""},
 		// All output signals clocked through inverting input to inverting outputs (Idle HI)
-		{"K11.1 (Unknown Clock Selected)",""},
+		// Propagation delay ~15ns-40ns
+		{"K11.1 (Unknown Clock Selected) to flip-flop UL13A.S_ drives UM8.I1a (?HALT/SS?)",""},
 		{"K11.2 (M13 Gate?)",""},
 		{"K11.3 (F11 Enable)",""},
 		{"K11.4 (Unknown Clock Selected)",""},
@@ -278,6 +291,7 @@ static char *decoded_sig[6][8][2] = {
 
 };
 
+
 static char *shifter_ops[8]= {
 	"S->RAM7", "?Up1(0?)->RAM7", "Q0->RAM7", "C->RAM7",
 	"RAM7->Q0", "?Dn1(0?)->Q0", "S->Q0", "?Dn3(C?)->Q0"
@@ -285,6 +299,20 @@ static char *shifter_ops[8]= {
 
 static char *carry_ops[4]= {
 	"?0->Cin", "?1->Cin", "?C->Cin", "?->Cin"
+};
+
+
+/* Addressable Latch UF11, Gated clock from K11.3 drives enable E_
+ * D4.Q1 drives Clr_ */
+static char *UF11_Outputs[8]= {
+	"UF11.Q0",
+	"UF11.Q1 (ABE_) Address Bus Enable (Active LO) ",
+	"UF11.Q2",
+	"UF11.Q3",
+	"UF11.Q4 UM8.I0b",
+	"UF11.Q5",
+	"UF11.Q6",
+	"UF11.Q7"	
 };
 
 
@@ -305,7 +333,7 @@ static char *UJ10_Sources[8] = {
 static char *UJ11_Sources[8] = {
 	"UJ11.I0 (=I4?)",
 	"UJ11.I1",
-	"UJ11.I2 UM12p7?",
+	"UJ11.I2 UM12.Q2?",
 	"UJ11.I3",
 	"UJ11.I4 (=I0?)",
 	"UJ11.I5",
@@ -325,7 +353,7 @@ static char *UJ12b_Sources[4] = {
 	"UJ12.I0b",
 	"UJ12.I1a Result F =? 0 (Zero; FLAG_V)",
 	"UJ12.I2b",
-	"UJ12.I3b UK10p11",
+	"UJ12.I3b UK10D.Y",
 };
 
 /* Ea_=Eb_= CASE_; S<1:0>=uADDR<5:4> */
@@ -338,7 +366,7 @@ static char *UJ13a_Sources[4] = {
 static char *UJ13b_Sources[4] = {
 	"UJ13.I0a Result F =? 0 (Zero; FLAG_V)",
 	"UJ13.I1b",
-	"UJ13.I2b UB12p1",
+	"UJ13.I2b UB12A.A",
 	"UJ13.I3b",
 };
 
@@ -358,41 +386,18 @@ static char *UK9_Sources[8] = {
 /* Ea_=Eb_= CASE_; S<1:0>=uADDR<7:6> */
 static char *UK13a_Sources[4] = {
 	"UK13.I0a UM12.Q3 (=UJ10.I0, UK10C.[AB])",
-	"UK13.I1a",
-	"UK13.I2a",
+	"UK13.I1a UF13.Q0",
+	"UK13.I2a UF13.Q1",
 	"UK13.I3a"
 };
 static char *UK13b_Sources[4] = {
 	"UK13.I0a",
 	"UK13.I1b",
-	"UK13.I2b UK10D.Y",
-	"UK13.I3b",
+	"UK13.I2b UF13.Q3",
+	"UK13.I3b UK10D.Y",
 };
 
-/*
 
-int read_roms() {
-	int r;
-	for(int i=0; i<NUMROMS; i++) {
-		r=rom_read_file(ROM_files[i],ROMSIZE,allrom[i]);
-		if(r) { printf("Error %x reading file %s\n", r, ROM_files[i]); return(r); }
-	}
-	r=rom_read_file(MAPROM_file, MAPROMSIZE, maprom);
-	return(r);
-}
-
-int merge_roms() {
-	uint64_t iw;
-	for(int i=0; i<ROMSIZE; i++) {
-		for(int j=0; j<NUMROMS; j++) {
-			mergedrom[i][j]=allrom[j][i];
-		}
-		iw=concat_bytes_64(NUMROMS,mergedrom[i]);
-		iws[i]=iw;
-	}
-	return(ROMSIZE);
-}
-*/
 void print_comments(word_t addr) {
 	comment_t *cmt=comments;
 	while(cmt->comment) {
@@ -440,7 +445,7 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 
 
 
-	//uIW->??/=BITRANGE(in,15,1); /* MUX UK9p7 */
+	uIW->D_E7_E3=BITRANGE(in,15,1); /* E7 Active HI Enable???    (MUX UK9p7) */
 	uIW->D_E7=BITRANGE(in,13,2); /* Decoder UE7 */
 	uIW->D_H11=BITRANGE(in,10,3); /* Decoder UH11 */
 	//uIW->NAND4_H13B_C=BITRANGE(in,9,1); /* Quad NAND Gate input C of UH13Bp12 */
@@ -466,6 +471,77 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 	uIW->M_UK9_E_=BITRANGE(in,47+0,1); /* MUX UK9 Enable: =LA<0> */
 	uIW->M_UK13_S10=BITRANGE(in,16+6,2); /* MUX UK13 Source Select */
 	
+
+	/* Setup our derrived values */
+
+	/* Assemble complete sequencer operations for each sequencer */
+	/* S0&S2 S{01} -> (NAND INT_), FE_ -> (NAND INT_) -> INV (cancels), PUP has no NAND */
+	uIW->Seq0Op=  ( ((~uIW->S0S)&0x3)<<2) | (uIW->FE_<<1) | (uIW->PUP<<0) ;
+	uIW->Seq1Op=  ( ((~uIW->S1S)&0x3)<<2) | (uIW->FE_<<1) | (uIW->PUP<<0) ;
+	uIW->Seq2Op=  ( ((~uIW->S2S)&0x3)<<2) | (uIW->FE_<<1) | (uIW->PUP<<0) ;
+
+	/* Decode decoder codes (Active LO) */
+	/* To Latch D4 */
+	uIW->D2_Out= ~(  ( uIW->D_D2D3&0x8)? 0 : 1<<((uIW->D_D2D3)&0x3) )&0xf;
+	/* To Latch D5 */
+	uIW->D3_Out= ~( (uIW->D_D2D3&0x8)? 1<<((uIW->D_D2D3)&0x7) : 0 )&0x3f;
+	/* From Latch E5 */
+	uIW->E6_Out= ~( 1<<(uIW->D_E6) )&0xff;
+	/* From Latch UJ5 */
+	uIW->K11_Out= ~( 1<<(uIW->D_K11) )&0xff;
+	uIW->H11_Out= ~( 1<<(uIW->D_H11) )&0xff;
+	/* From Latches UJ5 & UH5 */
+	uIW->E7_Out= ~( (uIW->D_E7_E3? 1:0)<<(uIW->D_E7) )&0x0f;
+	
+
+
+
+	/* UF6 - Carry Control *
+	 * Select from 
+	 * Output enables driven by ?
+	 * Carry control input connections:
+	 *                         SHCS=0    SHCS=1     SHCS=2    SHCS=3
+	 *     ??=0: (Za Enabled)  I0a=?     I1a=?      I2a=?     I3a=?
+	 *     ??=1: (Zb Enabled)  I0b=?     I1b=?      I2b=?     I3b=?
+	 *
+	 * Carry control output connections:
+	 *  Za -> ALU0.Cn (UF7)
+	 *
+	 *  0,0 -> ? Zero?
+	 *  0,1 -> ? One?
+	 *  0,2 -> ? Carry?
+	 *  0,3 -> ? ??
+	 */
+	uIW->S_Carry=uIW->SHCS;
+
+
+	/* UH6 - Shift Control *
+	 * Select from 
+	 * Output enables driven by ALU.I7 -> OEa_, -> INV -> OEb_
+	 * ALU.I7=0 -> Shift Down, ALU.I7=1 Shift Up
+	 * Shifter input connections:
+	 *                         SHCS=0     SHCS=1     SHCS=2     SHCS=3
+	 * ALU.I7=0: (Za Enabled)  I0a=S(2b)  I1a=?(1b)  I2a=Q0     I3a=C
+	 * ALU.I7=1: (Zb Enabled)  I0b=RAM7   I1b=?(1a)  I2b=S(0a)  I3b=
+	 *
+	 * Shifter output connections:
+	 * Za -> RAM7[ALU1.RAM3] (UF9), UJ10.I5
+	 * Zb -> Q0[ALU0.Q0] (UF7), UJ10.I7
+	 *
+	 * 0,0:    S->RAM7  SRA (Sign extend S->MSB)
+	 * 0,1:    ?->RAM7  SRL? (Zero?)
+	 * 0,2:   Q0->RAM7  (SRA/RRR) Half-word (Q0 of High byte shifts into MSB of Low byte)
+	 * 0,3:    C->RAM7  RRR (Rotate carry into MSB)
+	 *
+	 * 1,0: RAM7->Q0    RLR/SLR Half-word? (RAM7->Q0)
+	 * 1,1:    ?->Q0    SLR? (Zero?)
+	 * 1,2:    S->Q0    ?
+	 * 1,3:    ?->Q0    (C?) RLR?
+	 *
+	 *
+	 * See microcode @ 0x0d2-0x0e2 for 16 bit shift up through Q
+	 */
+	uIW->S_Shift=(uIW->I876&0x2?4:0)|uIW->SHCS;
 }
 
 void do_conditionals(cpu_state_t *st, uIW_trace_t *t) {
@@ -473,48 +549,48 @@ void do_conditionals(cpu_state_t *st, uIW_trace_t *t) {
 	nibble_t tn;
 
 	/* MUX UJ10 */
-	if(!t->uIW.M_UJ10_E_) {
-		tb=(t->uIW.M_UJ10_S210);
-		deroach("UJ10 Enabled, S=%0x: %s\n",tb,UJ10_Sources[tb]);
+	if(!t->uIW->M_UJ10_E_) {
+		tb=(t->uIW->M_UJ10_S210);
+		//deroach("UJ10 Enabled, S=%0x: %s\n",tb,UJ10_Sources[tb]);
 	}
 
 	/* MUX UJ11 */
-	if(!t->uIW.M_UJ11_E_) {
-		tb=(t->uIW.M_UJ11_S10 | (st->Reg.FLR&0x4));
-		deroach("UJ11 Enabled, S=%0x: %s\n",tb,UJ11_Sources[tb]);
+	if(!t->uIW->M_UJ11_E_) {
+		tb=(t->uIW->M_UJ11_S10 | (st->Reg.FLR&0x4));
+		//deroach("UJ11 Enabled, S=%0x: %s\n",tb,UJ11_Sources[tb]);
 	}
 
 	/* MUX UJ12 Enables unknown */
 	if(0) {
-		tn=(!t->uIW.M_UJ12_S10);
-		deroach("UJ12a Enabled, S=%0x: %s\n",tn,UJ12a_Sources[tn]);
+		tn=(!t->uIW->M_UJ12_S10);
+		//deroach("UJ12a Enabled, S=%0x: %s\n",tn,UJ12a_Sources[tn]);
 	}
 	if(0) {
-		tn=(!t->uIW.M_UJ12_S10);
-		deroach("UJ12b Enabled, S=%0x: %s\n",tn,UJ12b_Sources[tn]);
+		tn=(!t->uIW->M_UJ12_S10);
+		//deroach("UJ12b Enabled, S=%0x: %s\n",tn,UJ12b_Sources[tn]);
 	}
 
 
 	/* MUX UJ13 Enables common: CASE_ */
-	if(!t->uIW.CASE_) {
-		tn=(t->uIW.M_UJ13_S10);
-		deroach("UJ13a Enabled, S=%0x: %s\n",tn,UJ13a_Sources[tn]);
-		deroach("UJ13b Enabled, S=%0x: %s\n",tn,UJ13b_Sources[tn]);
+	if(!t->uIW->CASE_) {
+		tn=(t->uIW->M_UJ13_S10);
+		//deroach("UJ13a Enabled, S=%0x: %s\n",tn,UJ13a_Sources[tn]);
+		//deroach("UJ13b Enabled, S=%0x: %s\n",tn,UJ13b_Sources[tn]);
 	}
 
 
 	/* MUX UK9 */
-	if(!t->uIW.M_UK9_E_) {
-		tb=(t->uIW.M_UK9_S210);
-		deroach("UK9 Enabled, S=%0x: %s\n",tb,UK9_Sources[tb]);
+	if(!t->uIW->M_UK9_E_) {
+		tb=(t->uIW->M_UK9_S210);
+		//deroach("UK9 Enabled, S=%0x: %s\n",tb,UK9_Sources[tb]);
 	}
 
 
 	/* MUX UK13 Enables common: CASE_ */
-	if(!t->uIW.CASE_) {
-		tn=(t->uIW.M_UK13_S10);
-		deroach("UK13a Enabled, S=%0x: %s\n",tn,UK13a_Sources[tn]);
-		deroach("UK13b Enabled, S=%0x: %s\n",tn,UK13b_Sources[tn]);
+	if(!t->uIW->CASE_) {
+		tn=(t->uIW->M_UK13_S10);
+		//deroach("UK13a Enabled, S=%0x: %s\n",tn,UK13a_Sources[tn]);
+		//deroach("UK13b Enabled, S=%0x: %s\n",tn,UK13b_Sources[tn]);
 	}
 
 }
@@ -524,12 +600,12 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 	byte_t v,e;
 	for(int i=0; i<7; i++) {
 		switch(i) {
-			case 0: v=t->D2_Out; break;
-			case 1: v=t->D3_Out; break;
-			case 2: v=t->E6_Out; break;
-			case 3: v=t->K11_Out; break;
-			case 4: v=t->H11_Out; break;
-			case 5: v=t->E7_Out; break;
+			case 0: v=t->uIW->D2_Out; break;
+			case 1: v=t->uIW->D3_Out; break;
+			case 2: v=t->uIW->E6_Out; break;
+			case 3: v=t->uIW->K11_Out; break;
+			case 4: v=t->uIW->H11_Out; break;
+			case 5: v=t->uIW->E7_Out; break;
 		}
 		for(int j=0; j<8; j++) {
 			e= (i<<4) | (j<<1) | ( (v&(1<<j))? 1:0);
@@ -576,7 +652,7 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 					deroach("Read 0x%01x from high nibble of Dip Switches to DP-Bus\n", st->Bus.DP);
 					break;
 				case D_D3_5_READ_uCDATA:
-					st->Bus.DP= ~t->uIW.DATA_;
+					st->Bus.DP= ~t->uIW->DATA_;
 					deroach("Read 0x%02x of uCDATA to DP-Bus\n",st->Bus.DP);
 					break;
 				case D_H11_6_READ_MAPROM:
@@ -605,12 +681,12 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 
 	for(int i=0; i<7; i++) {
 		switch(i) {
-			case 0: v=t->D2_Out; break;
-			case 1: v=t->D3_Out; break;
-			case 2: v=t->E6_Out; break;
-			case 3: v=t->K11_Out; break;
-			case 4: v=t->H11_Out; break;
-			case 5: v=t->E7_Out; break;
+			case 0: v=t->uIW->D2_Out; break;
+			case 1: v=t->uIW->D3_Out; break;
+			case 2: v=t->uIW->E6_Out; break;
+			case 3: v=t->uIW->K11_Out; break;
+			case 4: v=t->uIW->H11_Out; break;
+			case 5: v=t->uIW->E7_Out; break;
 		}
 		//deroach("WRITE %0x: ",i);
 		for(int j=0; j<8; j++) {
@@ -618,16 +694,22 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 			//deroach(" 0x%2x",e);
 			switch(e) {
 				case D_E6_1_WRITE_RR:
+					if( !CLOCK_IS_LH(st->Clock.B2_.clk) ) { break; }
 					st->Reg.RR=st->Bus.F;
 					st->Bus.R=st->Bus.F;
 					deroach("Wrote 0x%02x to Result Register (RR)\n", st->Reg.RR);
 					break;
 				case D_E6_2_WRITE_RIR:
+					if( !CLOCK_IS_LH(st->Clock.B2_.clk) ) { break; }
 					st->Reg.RIR=st->Bus.F;
 					deroach("Register 0x%02x selected(RIR)\n", st->Reg.RIR);
 					break;
-				case D_E6_3_WRITE_D9: break;
+				case D_E6_3_WRITE_D9:
+					if( !CLOCK_IS_LH(st->Clock.B2_.clk) ) { break; }
+					deroach("Should write D9 <- F-Bus\n");
+				       	break;
 				case D_E6_4_WRITE_PTBAR:
+					if( !CLOCK_IS_LH(st->Clock.B2_.clk) ) { break; }
 					st->Reg.PTBAR=st->Bus.F;
 					deroach("Page Table Base Address set to 0x%02x\n", st->Reg.PTBAR);
 					break;
@@ -638,8 +720,8 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 					deroach("WAR input source set to Data Path\n");
 					break;
 				case D_E6_6_WRITE_SEQ_AR:
-					st->Seq.RiS0= (st->Bus.F&0x0f)>>0;
-					st->Seq.RiS1= (st->Bus.F&0xf0)>>4;
+					//st->Seq.RiS0= (st->Bus.F&0x0f)>>0;
+					//st->Seq.RiS1= (st->Bus.F&0xf0)>>4;
 					st->Seq.RE_=0; // Cheat for now, but just this would be the 'proper' way.
 					deroach("Wrote Seq{1,0} AR=0x%01x%01x\n", st->Seq.RiS1, st->Seq.RiS0);
 					//deroach("Sequencer AR latching enabled\n");
@@ -653,8 +735,8 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 					deroach("Clock to S_ input of flip-flop UL13A\n");
 					break;
 				case D_K11_3_WrCLK_F11_ENABLE: {
-					bit_t D=t->uIW.LB&0x1;
-					octal_t A=(t->uIW.LB&0xe)>>1;
+					bit_t D=t->uIW->LB&0x1;
+					octal_t A=(t->uIW->LB&0xe)>>1;
 					st->Reg.LUF11= ( st->Reg.LUF11 & (~(1<<A)&0xff) ) | (D<<A);
 					deroach("UF11 latched bit %0x=%0x, now contains 0x%02x\n", A, D, st->Reg.LUF11);
 					}; break;
@@ -671,10 +753,12 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 						st->Bus.DP, st->Reg.WAR);
 					break;
 				case D_H11_7_WRITE_NSWAPR:
+					if( !CLOCK_IS_LH(st->Clock.B2_.clk) ) { break; }
 					st->Reg.NSWAPR= ( (st->Bus.DP&0xf0)>>4) | ( (st->Bus.DP&0x0f)<<4);
 					deroach("Wrote 0x%02x to Nibble Swap Register from DP-Bus\n", st->Reg.NSWAPR);
 					break;
 				case D_E7_2_WRITE_FLR:
+					if( !CLOCK_IS_LH(st->Clock.B1_.clk) ) { break; }
 					st->Reg.FLR= (
 						( (st->ALU.FZ & 0x1)	<<0) |
 						( (st->ALU.F7 & 0x1)	<<1) |
@@ -703,16 +787,16 @@ void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 
 
 	/* Transfer inputs from microinstruction word to Seq inputs - this could be done with pointer mods instead? */
-	st->Seq.S0S= (~t->uIW.S0S)&0x3; // Seq0 Source for next uA
-	st->Seq.S1S= (~t->uIW.S1S)&0x3; // Seq1 Source for next uA
-	st->Seq.S2S= (~t->uIW.S2S)&0x3; // Seq2 Source for next uA
+	st->Seq.S0S= (~t->uIW->S0S)&0x3; // Seq0 Source for next uA
+	st->Seq.S1S= (~t->uIW->S1S)&0x3; // Seq1 Source for next uA
+	st->Seq.S2S= (~t->uIW->S2S)&0x3; // Seq2 Source for next uA
 
-	st->Seq.FE_= t->uIW.FE_&0x1; // (Active LO) File Enable, PUsh/Pop enabled when active
-	st->Seq.PUP= t->uIW.PUP&0x1; // PUP=LO: PUsh next uPC to stack; PUP=HI: Pop stack
+	st->Seq.FE_= t->uIW->FE_&0x1; // (Active LO) File Enable, PUsh/Pop enabled when active
+	st->Seq.PUP= t->uIW->PUP&0x1; // PUP=LO: PUsh next uPC to stack; PUP=HI: Pop stack
 
-	st->Seq.DiS0= (t->uIW.uADDR&0x00f)>>0; // Seq0 Direct Data Input Di<3:0>
-	st->Seq.DiS1= (t->uIW.uADDR&0x0f0)>>4; // Seq1 Direct Data Input Di<7:4>
-	st->Seq.DiS2= (t->uIW.uADDR&0x700)>>8; // Seq2 Direct Data Input Di<11:8>
+	st->Seq.DiS0= (t->uIW->uADDR&0x00f)>>0; // Seq0 Direct Data Input Di<3:0>
+	st->Seq.DiS1= (t->uIW->uADDR&0x0f0)>>4; // Seq1 Direct Data Input Di<7:4>
+	st->Seq.DiS2= (t->uIW->uADDR&0x700)>>8; // Seq2 Direct Data Input Di<11:8>
 	
 	printf("S0S=%0x  S1S=%0x  S2S=%0x\n",st->Seq.S0S, st->Seq.S1S, st->Seq.S2S);
 
@@ -721,10 +805,10 @@ void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 
 
 	// Try some logic on for size
-	if(!t->uIW.CASE_) {
+	if(!t->uIW->CASE_) {
 		printf("Let's try a conditoinal!\n");
 		printf("OR1S0=ALU.FZ=%0x  ",st->ALU.FZ);
-		st->Seq.ORiS0= t->uIW.CASE_?0x0:( (st->ALU.FZ <<1) ) ;
+		st->Seq.ORiS0= t->uIW->CASE_?0x0:( (st->ALU.FZ <<1) ) ;
 		printf("Seq.ORiS0=%0x\n",st->Seq.ORiS0);
 	} else { st->Seq.ORiS0=0; }
 
@@ -738,18 +822,18 @@ void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 	
 	/* Transfer inputs from microinstruction word to ALU inputs - this could be done with pointer mods instead? */
-	st->ALU.ADDR_A= t->uIW.LA&0xf;
-	st->ALU.ADDR_B= t->uIW.LB&0xf;
-	st->ALU.I876= ((octal_t)t->uIW.I876)&0x7;
-	st->ALU.I543= ((octal_t)t->uIW.I543)&0x7;
-	st->ALU.I210= ((octal_t)t->uIW.I210)&0x7;
+	st->ALU.ADDR_A= t->uIW->LA&0xf;
+	st->ALU.ADDR_B= t->uIW->LB&0xf;
+	st->ALU.I876= ((octal_t)t->uIW->I876)&0x7;
+	st->ALU.I543= ((octal_t)t->uIW->I543)&0x7;
+	st->ALU.I210= ((octal_t)t->uIW->I210)&0x7;
 
 	/* Update the Di inputs for both ALUs from the DP-Bus */
 	st->ALU.Dlow=  (st->Bus.DP&0x0f)>>0;
 	st->ALU.Dhigh= (st->Bus.DP&0xf0)>>4;
 
 	/* This needs additional logic */
-	st->ALU.Cin= (t->S_Carry==3?0:t->S_Carry==2?st->ALU.Cout:t->S_Carry?1:0);
+	st->ALU.Cin= (t->uIW->S_Carry==3?0:t->uIW->S_Carry==2?st->ALU.Cout:t->uIW->S_Carry?1:0);
 
 	/* Cycle starts on falling edge */
 	if(CLOCK_IS_HL(st->Clock.B1_.clk)) {
@@ -757,11 +841,11 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 	}
 
 	/* Update the shifter inputs/outputs */
-	if(t->S_Shift&0x4) {
-		st->Shifter.UpLine= (t->S_Shift==7?st->ALU.Cout:t->S_Shift==6?st->ALU.F7:t->S_Shift==5?0:st->ALU.RAM7);
+	if(t->uIW->S_Shift&0x4) {
+		st->Shifter.UpLine= (t->uIW->S_Shift==7?st->ALU.Cout:t->uIW->S_Shift==6?st->ALU.F7:t->uIW->S_Shift==5?0:st->ALU.RAM7);
 		st->ALU.Q0=st->Shifter.UpLine;
 	} else {
-		st->Shifter.DownLine= (t->S_Shift==3?st->ALU.Cout:t->S_Shift==2?st->ALU.Q0:t->S_Shift?0:st->ALU.F7);
+		st->Shifter.DownLine= (t->uIW->S_Shift==3?st->ALU.Cout:t->uIW->S_Shift==2?st->ALU.Q0:t->uIW->S_Shift?0:st->ALU.F7);
 		st->ALU.RAM7=st->Shifter.DownLine;
 	}
 
@@ -785,14 +869,9 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 
 void trace_uIW(cpu_state_t *st, uIW_trace_t *t, uint16_t addr, uint64_t in) {
 	t->uADDR=addr;
-	parse_uIW(&(t->uIW), in);
+	//parse_uIW(&(t->uIW), in);
 
 
-	/* Assemble complete sequencer operations for each sequencer */
-	/* S0&S2 S{01} -> (NAND INT_), FE_ -> (NAND INT_) -> INV (cancels), PUP has no NAND */
-	t->Seq0Op=  ( ((~t->uIW.S0S)&0x3)<<2) | (t->uIW.FE_<<1) | (t->uIW.PUP<<0) ;
-	t->Seq1Op=  ( ((~t->uIW.S1S)&0x3)<<2) | (t->uIW.FE_<<1) | (t->uIW.PUP<<0) ;
-	t->Seq2Op=  ( ((~t->uIW.S2S)&0x3)<<2) | (t->uIW.FE_<<1) | (t->uIW.PUP<<0) ;
 
 	/* Start our cycle */	
 	clock_set(&st->Clock.B,CLK_HL);
@@ -802,60 +881,8 @@ void trace_uIW(cpu_state_t *st, uIW_trace_t *t, uint16_t addr, uint64_t in) {
 	do {
 		/* Clock.B0_ */
 		if(CLOCK_IS_LH(st->Clock.B0_.clk)) {
-			/* Decode decoder codes (Active LO) */
-			/* From Latch UJ5 */
-			t->K11_Out= ~( 1<<(t->uIW.D_K11) )&0xff;
-			t->H11_Out= ~( 1<<(t->uIW.D_H11) )&0xff;
-			/* From Latches UJ5 & UH5 */
-			t->E7_Out= ~( 1<<(t->uIW.D_E7) )&0x0f;
 
 
-			/* UF6 - Carry Control *
-			 * Select from 
-			 * Output enables driven by ?
-			 * Carry control input connections:
-			 *                         SHCS=0    SHCS=1     SHCS=2    SHCS=3
-			 *     ??=0: (Za Enabled)  I0a=?     I1a=?      I2a=?     I3a=?
-			 *     ??=1: (Zb Enabled)  I0b=?     I1b=?      I2b=?     I3b=?
-			 *
-			 * Carry control output connections:
-			 *  Za -> ALU0.Cn (UF7)
-			 *
-			 *  0,0 -> ? Zero?
-			 *  0,1 -> ? One?
-			 *  0,2 -> ? Carry?
-			 *  0,3 -> ? ??
-			 */
-			t->S_Carry=t->uIW.SHCS;
-
-
-			/* UH6 - Shift Control *
-			 * Select from 
-			 * Output enables driven by ALU.I7 -> OEa_, -> INV -> OEb_
-			 * ALU.I7=0 -> Shift Down, ALU.I7=1 Shift Up
-			 * Shifter input connections:
-			 *                         SHCS=0     SHCS=1     SHCS=2     SHCS=3
-			 * ALU.I7=0: (Za Enabled)  I0a=S(2b)  I1a=?(1b)  I2a=Q0     I3a=C
-			 * ALU.I7=1: (Zb Enabled)  I0b=RAM7   I1b=?(1a)  I2b=S(0a)  I3b=
-			 *
-			 * Shifter output connections:
-			 * Za -> RAM7[ALU1.RAM3] (UF9), UJ10.I5
-			 * Zb -> Q0[ALU0.Q0] (UF7), UJ10.I7
-			 *
-			 * 0,0:    S->RAM7  SRA (Sign extend S->MSB)
-			 * 0,1:    ?->RAM7  SRL? (Zero?)
-			 * 0,2:   Q0->RAM7  (SRA/RRR) Half-word (Q0 of High byte shifts into MSB of Low byte)
-			 * 0,3:    C->RAM7  RRR (Rotate carry into MSB)
-			 *
-			 * 1,0: RAM7->Q0    RLR/SLR Half-word? (RAM7->Q0)
-			 * 1,1:    ?->Q0    SLR? (Zero?)
-			 * 1,2:    S->Q0    ?
-			 * 1,3:    ?->Q0    (C?) RLR?
-			 *
-			 *
-			 * See microcode @ 0x0d2-0x0e2 for 16 bit shift up through Q
-			 */
-			t->S_Shift=(t->uIW.I876&0x2?4:0)|t->uIW.SHCS;
 
 
 		}
@@ -863,13 +890,6 @@ void trace_uIW(cpu_state_t *st, uIW_trace_t *t, uint16_t addr, uint64_t in) {
 
 		/* Clock.B2_ */
 		if(CLOCK_IS_LH(st->Clock.B2_.clk)) {
-			/* Decode decoder codes (Active LO) */
-			/* To Latch D4 */
-			t->D2_Out= ~(  ( t->uIW.D_D2D3&0x8)? 0 : 1<<((t->uIW.D_D2D3)&0x3) )&0xf;
-			/* To Latch D5 */
-			t->D3_Out= ~( (t->uIW.D_D2D3&0x8)? 1<<((t->uIW.D_D2D3)&0x7) : 0 )&0x3f;
-			/* From Latch E5 */
-			t->E6_Out= ~( 1<<(t->uIW.D_E6) )&0xff;
 		}
 
 
@@ -1033,38 +1053,133 @@ void print_decoder_values(enum decoder_enum d, uint8_t v) {
 void print_uIW_trace(uIW_trace_t *t) {
 	print_comments(t->uADDR);
 	printf("Current Address: 0x%03x  Previous Address: 0x%03x  Next Address: 0x%03x\n", t->uADDR, t->uADDR_Prev, t->uADDR_Next);
-	printf("uCData: D/uADDR=0x%03x (DATA_=0x%02x)", t->uIW.uADDR, (~t->uIW.DATA_)&0xff);
-	printf(" Shifter: %s / Carry Select: %s (SHCS=%0x)\n",shifter_ops[t->S_Shift], carry_ops[t->S_Carry], t->uIW.SHCS);
-	printf("Conditoinal: %s\n",t->uIW.CASE_?"No":"Yes");
+	printf("uCData: D/uADDR=0x%03x (DATA_=0x%02x)", t->uIW->uADDR, (~t->uIW->DATA_)&0xff);
+	printf(" Shifter: %s / Carry Select: %s (SHCS=%0x)\n",
+		shifter_ops[t->uIW->S_Shift],
+		carry_ops[t->uIW->S_Carry],
+		t->uIW->SHCS);
+	printf("Conditoinal: %s\n",t->uIW->CASE_?"No":"Yes");
 	printf("DP-Bus: 0x%02x\n", t->DP);
 	printf("ALUs: A=0x%01x B=0x%01x RS=%s %s -> %s\n",
-		t->uIW.LA,
-		t->uIW.LB,
-		am2901_source_operand_mnemonics[t->uIW.I210],
-		am2901_function_symbol[t->uIW.I543],
-		am2901_destination_mnemonics[t->uIW.I876]
+		t->uIW->LA,
+		t->uIW->LB,
+		am2901_source_operand_mnemonics[t->uIW->I210],
+		am2901_function_symbol[t->uIW->I543],
+		am2901_destination_mnemonics[t->uIW->I876]
 	);
 	printf("F-Bus: 0x%02x\n",t->F);
 	printf("R-Bus: 0x%02x\n",t->R);
 	printf("Seqs: S0: %s, S1: %s, S2: %s\n",
-		am2909_ops[t->Seq0Op][3],
-		am2909_ops[t->Seq1Op][3],
-		am2909_ops[t->Seq2Op][3]
+		am2909_ops[t->uIW->Seq0Op][3],
+		am2909_ops[t->uIW->Seq1Op][3],
+		am2909_ops[t->uIW->Seq2Op][3]
 	);
 	printf("Selected register: 0x%01x\n",t->RIR);
 	printf("\nDecoders E7:0x%02x H11:0x%02x K11:0x%02x E6:0x%02x D3:0x%02x D2:0x%02x\n",
-		t->E7_Out, t->H11_Out, t->K11_Out, t->E6_Out, t->D3_Out, t->D2_Out);
+		t->uIW->E7_Out, t->uIW->H11_Out, t->uIW->K11_Out, t->uIW->E6_Out, t->uIW->D3_Out, t->uIW->D2_Out);
 
-	print_decoder_values(D_D2,  t->D2_Out);
-	print_decoder_values(D_D3,  t->D3_Out);
-	print_decoder_values(D_E6,  t->E6_Out);
-	print_decoder_values(D_K11, t->K11_Out);
-	print_decoder_values(D_H11, t->H11_Out);
-	print_decoder_values(D_E7,  t->E7_Out);
+	print_decoder_values(D_D2,  t->uIW->D2_Out);
+	print_decoder_values(D_D3,  t->uIW->D3_Out);
+	print_decoder_values(D_E6,  t->uIW->E6_Out);
+	print_decoder_values(D_K11, t->uIW->K11_Out);
+	print_decoder_values(D_H11, t->uIW->H11_Out);
+	print_decoder_values(D_E7,  t->uIW->E7_Out);
 	printf("\n");
 		
 
 }
+
+void print_uIW(uIW_t *u) {
+	byte_t tb;
+	nibble_t tn;
+	print_comments(u->address);
+	printf("Current Address: 0x%03x\n", u->address);
+	printf("uCData: D/uADDR=0x%03x (DATA_=0x%02x)", u->uADDR, (~u->DATA_)&0xff);
+	printf(" Shifter: %s / Carry Select: %s (SHCS=%0x)\n",shifter_ops[u->S_Shift], carry_ops[u->S_Carry], u->SHCS);
+	printf("Conditoinal: %s\n",u->CASE_?"No":"Yes");
+	printf("ALUs: A=0x%01x B=0x%01x RS=%s %s -> %s\n",
+		u->LA,
+		u->LB,
+		am2901_source_operand_mnemonics[u->I210],
+		am2901_function_symbol[u->I543],
+		am2901_destination_mnemonics[u->I876]
+	);
+	printf("Seqs: S0: %s, S1: %s, S2: %s\n",
+		am2909_ops[u->Seq0Op][3],
+		am2909_ops[u->Seq1Op][3],
+		am2909_ops[u->Seq2Op][3]
+	);
+	if(u->D_E6==0x6) { printf("S0 & S1 RE_=LO; Latching Ri\n"); }
+
+	printf("\nDecoders E7:0x%02x H11:0x%02x K11:0x%02x E6:0x%02x D3:0x%02x D2:0x%02x\n",
+		u->E7_Out, u->H11_Out, u->K11_Out, u->E6_Out, u->D3_Out, u->D2_Out);
+
+	print_decoder_values(D_D2,  u->D2_Out);
+	print_decoder_values(D_D3,  u->D3_Out);
+	print_decoder_values(D_E6,  u->E6_Out);
+	print_decoder_values(D_K11, u->K11_Out);
+	print_decoder_values(D_H11, u->H11_Out);
+	print_decoder_values(D_E7,  u->E7_Out);
+	printf("\n");
+	
+	if( u->D_K11==3 ) {
+		printf("Clocking UF11.E_ Enabled S=%u D=%u: %s\n\n",(u->LB>>1),(u->LB&0x1),UF11_Outputs[u->LB>>1] );
+	}
+
+
+	/* MUX UJ10 */
+	if(!u->M_UJ10_E_) {
+		tb=u->M_UJ10_S210;
+		printf("UJ10 Enabled, S2 source questionable. uCAD<8>=%0u :\n",(tb&0x4)?1:0);
+		printf("\tIf S2=1, S10=%0x: %s\n",tb,UJ10_Sources[(tb&0x3)|4]);
+		printf("\tIf S2=0, S10=%0x: %s\n",tb,UJ10_Sources[tb&0x3]);
+	}
+
+	/* MUX UJ11 */
+	if(!u->M_UJ11_E_) {
+		tb=u->M_UJ11_S10;
+		printf("UJ11 Enabled:\n");
+		printf("\tIf Flag_M, S=%0x: %s\n",tb,UJ11_Sources[tb|4]);
+		printf("\tOtherwise, S=%0x: %s\n",tb,UJ11_Sources[tb]);
+	}
+
+	/* MUX UJ12 Enables unknown */
+	if(1) {
+		tn=(u->M_UJ12_S10);
+		printf("UJ12a Unknown if Enabled, S=%0x: %s\n",tn,UJ12a_Sources[tn]);
+	}
+	if(1) {
+		tn=(u->M_UJ12_S10);
+		printf("UJ12b Unknown if Enabled, S=%0x: %s\n",tn,UJ12b_Sources[tn]);
+	}
+
+
+	/* MUX UJ13 Enables common: CASE_ */
+	if(!u->CASE_) {
+		tn=(u->M_UJ13_S10);
+		deroach("UJ13a Enabled, S=%0x: %s\n",tn,UJ13a_Sources[tn]);
+		deroach("UJ13b Enabled, S=%0x: %s\n",tn,UJ13b_Sources[tn]);
+	}
+
+
+	/* MUX UK9 */
+	if(!u->M_UK9_E_) {
+		tb=(u->M_UK9_S210);
+		deroach("UK9 Enabled, S=%0x: %s\n",tb,UK9_Sources[tb]);
+	}
+
+
+	/* MUX UK13 Enables common: CASE_ */
+	if(!u->CASE_) {
+		tn=(u->M_UK13_S10);
+		deroach("UK13a Enabled, S=%0x: %s\n",tn,UK13a_Sources[tn]);
+		deroach("UK13b Enabled, S=%0x: %s\n",tn,UK13b_Sources[tn]);
+	}
+		
+
+}
+
+
 
 void init_cpu_state(cpu_state_t *st) {
 	clock_init(&st->Clock.B,"Clock.B", CLK_LO);
@@ -1087,37 +1202,32 @@ int main(int argc, char **argv) {
 	uint64_t salad;
 	char binstr[100];
 	cpu_state_t cpu_st;
-	uIW_trace_t trace[ROMSIZE];
+	uIW_t uIW[ROMSIZE_uCode_rom];
+	uIW_trace_t trace[ROMSIZE_uCode_rom];
+	
 	//Byte to force into sys data bus register
 	if(argc > 1 ) { inject=argv+1; inject_size=argc-1; }
 	else { inject=inj_NOP; inject_size=1; }
 
-	//if( (r=read_roms()) == 0 ) {
-	//merge_roms();
+	for(int i=0; i<ROMSIZE_uCode_rom; i++) {
+		uIW[i].address=i;
+		parse_uIW(&uIW[i],uCode_rom[i]);
+	}
 
 	init_cpu_state(&cpu_st);
 	uA=0x0; uAp=0;
 	for(int i=0; i<ROMSIZE_uCode_rom; i++) {
-		//printf("\n%#06x: %#06x",i,allrom[0][i]);
-		//byte_bits_to_binary_string_grouped(binstr, allrom[0][i], NUMROMS*8, 1);
-		//printf("   %s",binstr);
-		//int64_bits_to_binary_string_grouped(binstr, iws[i], NUMROMS*8,4);
-		//int64_bits_to_binary_string_fields(binstr, iws[uA], NUMROMS*8,
-		//	"\x1\1\1\x2\x4\x4\x3\x3\x3\x1\x2\x2\x2\x3\x4\x4\x1\x2\x3\x3\x3\x4");
-		//printf("Cycle:%04u 0x%#03x: 0x%016"PRIx64" %s\n",i,uA,iws[uA],binstr);
+
 		int64_bits_to_binary_string_fields(binstr, uCode_rom[uA], ROMWIDTH_uCode_rom*8,
 			"\x1\1\1\x2\x4\x4\x3\x3\x3\x1\x2\x2\x2\x3\x4\x4\x1\x2\x3\x3\x3\x4");
+
 		printf("Cycle:%04u 0x%03x: 0x%016"PRIx64" %s\n",i,uA,uCode_rom[uA],binstr);
-		//trace_uIW(&cpu_st, &trace[i],i,iws[i]);
+		print_uIW(&uIW[uA]);
 		trace[i].uADDR_Prev=uAp;
+		trace[i].uIW=&uIW[uA];
 		trace_uIW(&cpu_st, &trace[i],uA,uCode_rom[uA]);
-		//trace_uIW(&cpu_st, &trace[i],uA,iws[uA]);
-		print_uIW_trace(&trace[i]);
+		//print_uIW_trace(&trace[i]);
 		uAp=uA;
 		uA=trace[i].uADDR_Next;
-		//uA=i;
 	}
-	//} else {
-	//	printf("Could not read ROMS!");
-	//}
 }

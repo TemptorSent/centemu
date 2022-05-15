@@ -66,7 +66,7 @@ char *am2909_clock_edge_LH(am2909_device_t *dev) {
 	S_(Co)= ( S_(Cn) && (I_(uPC)==0xf) )? 1 : 0;
 	I_(uPC)=(I_(uPC)+S_(Cn))&0xf;
 
-	deroach("\tNext uPC=0x%01x (Cin=%0x,Cout=%0x)\n",I_(uPC),S_(Cn),S_(Co));
+	deroach("\tNext uPC=0x%01x  AR=0x%01x  (Cin=%0x,Cout=%0x)\n",I_(uPC),I_(AR),S_(Cn),S_(Co));
 
 	return(0);
 }

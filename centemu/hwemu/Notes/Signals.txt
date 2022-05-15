@@ -34,12 +34,12 @@ UD9.Q5->UC14.I1b
 
 
 
-# Address Latch Clock and Count Pulse Control
+# Address Register/Counter Clock and Count Pulse Control
 #UD6	74LS157
-CLK_? ->	I0a	-> CLK_UD6Za "CLK_OAL"
-		I0c 	-> CLK_UD6Zc "CLK_SAL"
-CLK_? ->	I1b	-> CLK_UD6Zb "CEP_OAL"
-		I1d	-> CLK_UD6Zd "CEP_SAL"
+CLK_? ->	I0a	-> CLK_UD6Za "CLK_MAR"
+		I0c 	-> CLK_UD6Zc "CLK_WAR"
+CLK_? ->	I1b	-> CLK_UD6Zb "CEP_MAR"
+		I1d	-> CLK_UD6Zd "CEP_WAR"
 ! p1, p{2,11}, p{6,13} 
 ? p3,p5,p10,p14,p15 (may be unused, tied high/low)
 
