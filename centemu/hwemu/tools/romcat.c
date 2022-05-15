@@ -1,200 +1,96 @@
 #include <stdio.h>
 #include <inttypes.h>
-/*
-#define NUMROMS 7
-#define ROMSIZE 2048
-*/
-#define NUMROMS 1
-#define ROMSIZE 256
-
-/* Utility functions to extract ranges of bits, with _R reversing the bit order returned */
-#define BITRANGE(d,s,n) ((d>>s) & ((1LL<<n)-1) )
-#define BITRANGE_R(d,s,n) (bitreverse_64(BITRANGE(d,s,n)) >>(64-n))
-
-uint8_t allrom[NUMROMS][ROMSIZE];
-uint8_t mergedrom[ROMSIZE][NUMROMS];
-uint64_t iws[ROMSIZE];
-static char *ROM_files[NUMROMS] = {
-	"CPU-6309"
-};
-
-//	"CPU_5.rom", /* MWK3.11 - A3.11 */
-//	"CPU_2.rom", /* MWF3.11 - B3.11 */
-//	"CPU_3.rom", /* MWH3.11 - C3.11 */
-//	"CPU_6.rom", /* MWL3.11 - D3.11 */
-//	"CPU_7.rom", /* MWM3.11 - E3.11 */
-//	"CPU_4.rom", /* MWJ3.11 - F3.11 */
-//	"CPU_1.rom"  /* MWE3.11 - ??3.11 */
-//};
-/*static char *ROM_files[NUMROMS] = {
-	"CPU_1.rom",
-	"CPU_2.rom",
-	"CPU_3.rom",
-	"CPU_4.rom",
-	"CPU_5.rom",
-	"CPU_6.rom",
-	"CPU_7.rom"
-};
-*/
-
-/* Concatenate an array of bytes into an unsigned 64-bit int */
-uint64_t concat_bytes(uint8_t bytes[]){
-	uint64_t out=0,in;
-	for(int i=0;i<NUMROMS;i++) {
-		in=bytes[i];
-		//printf(" in[%u]=%x ",i,in);
-		out = out | (in<<(i*8));
-	}
-	return(out);
-}
-
-uint64_t bitreverse_64(uint64_t in) {
-	uint64_t out=0;
-	for(int i=63;i>=0;i--) {
-		//printf("%u %#018"PRIx64" %#018"PRIx64"\n",i,in,out);
-		out |= in&0x1;
-		if(!i){return(out);}
-		out <<= 1;
-		in >>= 1;
-		//printf("%u %#018"PRIx64" %#018"PRIx64"\n",i,in,out);
-	}
-}
-
-uint16_t bitsalad_16(uint64_t order, uint16_t d) {
-	uint8_t pos;
-	uint16_t out;
-	for(int i=0; i<16; i++) {
-		pos=BITRANGE(order,i*4,4);
-		if(d&1<<i){out |= 1<<pos;}
-	}
-	return(out);
-}
-
-uint8_t bitsalad_8(uint32_t order, uint8_t d) {
-	uint8_t pos;
-	uint8_t out;
-	for(int i=0; i<16; i++) {
-		pos=BITRANGE(order,i*4,4);
-		if(d&1<<i){out |= 1<<pos;}
-	}
-	return(out);
-}
-
-int read_roms() {
-	FILE *fp;
-	size_t ret_code;
-
-	for(int  i=0; i<NUMROMS; i++) {
-		fp=fopen(ROM_files[i],"rb");
-		ret_code=fread(allrom[i],1,ROMSIZE,fp);
-		if(ret_code != ROMSIZE) {
-			if(feof(fp)) {
-				printf("Unexpected EOF while reading %s: Only got %u byte of an expected %s.\n",
-					ROM_files[i], ret_code, ROMSIZE);
-			} else if(ferror(fp)){
-				printf("Failed while reading %s!\n",ROM_files[i]);
-			}
-			fclose(fp);
-			return(-1);
-		}
-		fclose(fp);
-
-		//printf("firstval: %x\n",allrom[i][0]);
-	}
-	return((int)ret_code);
-
-}
-
-int merge_roms() {
-	uint64_t iw;
-	for(int i=0; i<ROMSIZE; i++) {
-		//printf("\n%04x",i);
-		for(int j=1; j<=NUMROMS; j++) {
-			mergedrom[i][NUMROMS-j]=allrom[j][i];
-			//printf(" %02x",mergedrom[i][NUMROMS-j]);
-		}
-		iw=concat_bytes(mergedrom[i]);
-		iws[i]=iw;
-		/*
-		printf("\tI:%03o A':%x A:%x  %#018"PRIx64"",
-			BITRANGE(iw,34,9),
-			BITRANGE(iw,44,4),
-			BITRANGE_R(iw,44,4),
-			iw
-		);
-		*/
-	}
-
-	return(ROMSIZE);
-}
-/* Represent specified number of bits of a 64-bit integer as an ascii string of '1's, '0's and ' ' */
-/* Provide an output buffer long enough to hold all bits plus spaces between fields plus NULL */
-/* Split sequences of bits into fields of specified widths given as byte string ("\x2\x10\x8..") */
-char  *int64_bits_to_binary_string_fields(char *out, uint64_t in, uint8_t bits, char *fieldwidths) {
-	char *p;
-	char *f;
-	uint8_t fc=0;
-	f=fieldwidths;
-	p=out;
-	bits=bits<65?bits:64;
-	for(int i=bits-1; i>=0; i--) {
-		if(!fc && *f) { fc=*(f++); }
-		*(p++)=(in&(1LL<<i))?'1':'0';
-		if(!--fc){ *(p++)=' '; }
-	}
-	*p='\0';
-	return(out);
-}
-
-/* Represent specified number of bits of a 64-bit integer as an ascii string of '1's and '0's */
-/* Provide an output buffer long enough to hold all bits plus spaces between fields plus NULL */
-/* Split sequences of bits into space separated groups of specified size */
-char  *int64_bits_to_binary_string_grouped(char *out, uint64_t in, uint8_t bits, uint8_t grouping) {
-	char *p;
-	p=out;
-	bits=bits<65?bits:64;
-	for(int i=bits-1; i>=0; i--) {
-		*(p++)=(in&(1LL<<i))?'1':'0';
-		if(i&&!(i%grouping)&&grouping){ *(p++)=' '; }
-	}
-	*p='\0';
-	return(out);
-}
-
-char  *byte_bits_to_binary_string_grouped(char *out, uint8_t in, uint8_t bits, uint8_t grouping) {
-	char *p;
-	p=out;
-	bits=bits<9?bits:8;
-	for(int i=bits-1; i>=0; i--) {
-		*(p++)=(in&(1<<i))?'1':'0';
-		if(i&&!(i%grouping)&&grouping){ *(p++)=' '; }
-	}
-	*p='\0';
-	return(out);
-}
+#include <stdlib.h>
+#include <getopt.h>
 
 
-int main(int argc, char **argv) {
+int main(int argc, char *argv[]) {
 	int r;
-	uint16_t tmp;
-	uint64_t salad;
-	char binstr[100];
-	if( (r=read_roms()) > 0 ) {
-		//printf("read_roms returned: %i\n",r);
-		merge_roms();
+	uint16_t i=0;
+	int opt, optidx;
+	uint8_t fnum, files, chunks, stride=1;
+	char format= 'b';
+	char *Fdelim="";
+	char *Rdelim="\n";
+	FILE *fp[8];
 
-		for(int i=0; i<ROMSIZE; i++) {
-			printf("\n%#04x: %#04x",i,allrom[0][i]);
-			byte_bits_to_binary_string_grouped(binstr, allrom[0][i], NUMROMS*8, 1);
-			printf("   %s",binstr);
-			//int64_bits_to_binary_string_grouped(binstr, iws[i], NUMROMS*8,4);
-			//int64_bits_to_binary_string_fields(binstr, iws[i], NUMROMS*8,"\x1\x2\x4\x6\x8\xa\xc\xe");
-			//printf(" %#016"PRIx64" %s",iws[i],binstr);
-			//printf(" 2901H: I=%03o",BITRANGE(iws[i],10,9));
-			//printf(" 2909H: FE_PUP=%01o",BITRANGE_R(iws[i],28,2));
+	const struct option long_opts[] = {
+		{"stride",	required_argument,0,'s'},
+		{"format",	required_argument,0,'f'},
+		{"FS",	required_argument,0,'d'},
+		{"field-separator",	required_argument,0,'d'},
+		{"RS",	required_argument,0,'r'},
+		{"record-separator",	required_argument,0,'r'},
+		{0,0,0,0}
+	};
+	char *optstr= "s:f:d:r:";
+	while(1) {
+		opt = getopt_long(argc,argv,optstr,long_opts,&optidx);
+		if(opt==-1){ break; }
+		switch(opt) {
+			case 's': stride=atoi(optarg); break;
+			case 'f': format=*optarg; break;
+			case 'd': Fdelim=optarg; break;
+			case 'r': Rdelim=optarg; break;
 		}
-	} else {
-		printf("Could not read ROMS!");
+	}
+	if( stride > 8 ) {
+		printf("Maximum stride is (currently) 8 bytes (long long int)\n");
+		return(-1);
 	}
 
+	files=argc-optind;
+	if(!files ) {
+		printf("Requires one or more filenames name as an arguments\n");
+		return(-1);
+	}
+	
+	if(files%stride) {
+		printf("Number of files must be an even multiple of stride (%0u)\n",stride);
+		return(-1);
+	}
+	
+	chunks=(files/stride);
+	i=0;
+	for(int c=0; c<chunks;c++) {
+
+		for(int f=0; f<stride;f++){
+			fnum=(stride*c)+f;
+			if( !(fp[f]=fopen(argv[optind+fnum],"rb")) ) {
+				fprintf(stderr,"Failed while reading %s",argv[optind+fnum]);
+				perror("fopen:");
+				for(int q=0; q<stride;q++) { if(fp[q]){ fclose(fp[q]); } };
+				return(-1);
+			}
+		}
+
+		do {
+			r=fgetc(fp[i%stride]);
+			if(feof(fp[i%stride])) { break; }
+			
+			switch(format) {
+				case 'x':
+					if(!(i%stride) && i) { printf("%s",Rdelim); }
+					printf("%02x",r);
+					break;
+				default:
+				case 'b': printf("%c",r); break;
+
+				//	printf("%s%s0x%02x",i?",":"",i%8?"":"\n\t",(uint8_t)r);
+
+			}
+			i++;
+		} while(1);
+
+
+		if(ferror(fp[i%stride])){
+			fprintf(stderr,"Failed while reading %s",argv[optind+(stride*c)+(i%stride)]);
+			perror("read_rom_file");
+			for(int q=0; q<stride;q++) { if(fp[q]){ fclose(fp[q]); } };
+			return(-1);
+
+		}
+		for(int q=0; q<stride;q++) { if(fp[q]){ fclose(fp[q]); } };
+	}
+	return(0);
 }

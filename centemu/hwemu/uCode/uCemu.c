@@ -7,10 +7,13 @@
 #include "../components/am2901.h"
 #include "../components/am2909.h"
 #include "../common/rom-common.h"
-#include "./bootstrap_rom.h"
 
 
-#include "comments_generated.h"
+#include "./include/uCode_rom.h"
+#include "./include/maprom_rom.h"
+#include "./include/bootstrap_rom.h"
+
+#include "./include/comments_generated.h"
 
 // Inject bytes into system databus reads
 char **inject;
@@ -18,12 +21,13 @@ byte_t inject_size;
 byte_t inject_pos;
 
 /* Microcode ROMs */
-#define NUMROMS 7
+//#define NUMROMS 7
 #define ROMSIZE 2048
 
-static uint8_t allrom[NUMROMS][ROMSIZE];
-static uint8_t mergedrom[ROMSIZE][NUMROMS];
-static uint64_t iws[ROMSIZE];
+//static uint8_t allrom[NUMROMS][ROMSIZE];
+//static uint8_t mergedrom[ROMSIZE][NUMROMS];
+//static uint64_t iws[ROMSIZE];
+/*
 static char *ROM_files[NUMROMS] = {
 	"./ROMs/CPU_UM3_MWE3.11_M3.11.rom",	// MC<8:0>; uIW<55:48>
 	"./ROMS/CPU_UJ3_MWJ3.11_F3.11.rom",	// MC<31:24>; uIW<47:40>
@@ -33,12 +37,12 @@ static char *ROM_files[NUMROMS] = {
 	"./ROMS/CPU_UL3_MWF3.11_B3.11.rom",	// MC<15:8>; uIW<15:8>
 	"./ROMS/CPU_UH3_MWK3.11_A3.11.rom"	// MC<39:32>; uIW<7:0>
 };
-
+*/
 
 /* ISA Entry point offset MAPROM */
-#define MAPROMSIZE 0x100
-uint8_t maprom[MAPROMSIZE];
-static char *MAPROM_file = "./ROMs/CPU_UB13_MAPROM_6309.rom";
+//#define MAPROMSIZE 0x100
+//uint8_t maprom[MAPROMSIZE];
+//static char *MAPROM_file = "./ROMs/CPU_UB13_MAPROM_6309.rom";
 
 
 /* Structure for storing our machine state */
@@ -287,7 +291,7 @@ static char *carry_ops[4]= {
 
 /* E_: uADDR<5>; S{2:0}=uADDR<8?:6> */
 static char *UJ10_Sources[8] = {
-	"UJ10.I0 (=UK13.I1a, UK10C.[AB])",
+	"UJ10.I0 UM12.Q3 (=UK13.I1a, UK10C.[AB])",
 	"UJ10.I1 UK10C.Y ( =INV(UJ10.I0) )",
 	"UJ10.I2 Link Flag? (Carry)",
 	"UJ10.I3",
@@ -353,8 +357,8 @@ static char *UK9_Sources[8] = {
 
 /* Ea_=Eb_= CASE_; S<1:0>=uADDR<7:6> */
 static char *UK13a_Sources[4] = {
-	"UK13.I0a UM12p10",
-	"UK13.I1a (=UJ10.I0, UK10C.[AB])",
+	"UK13.I0a UM12.Q3 (=UJ10.I0, UK10C.[AB])",
+	"UK13.I1a",
 	"UK13.I2a",
 	"UK13.I3a"
 };
@@ -365,7 +369,7 @@ static char *UK13b_Sources[4] = {
 	"UK13.I3b",
 };
 
-
+/*
 
 int read_roms() {
 	int r;
@@ -388,7 +392,7 @@ int merge_roms() {
 	}
 	return(ROMSIZE);
 }
-
+*/
 void print_comments(word_t addr) {
 	comment_t *cmt=comments;
 	while(cmt->comment) {
@@ -433,17 +437,6 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 	uIW->uADDR=BITRANGE(in,16,11); /* uC Address (11bits, lower 8 multiplex with DATA_) */
 	uIW->DATA_=BITRANGE(in,16,8); /* Data (inverted) (=low 8 bits of uC Address) */
 
-	/* Conditional MUX controls mostly overlap with uADDR range */
-	uIW->M_UJ10_S210=BITRANGE(in,16+6,3); /* MUX UJ10 Source Select */
-	uIW->M_UJ10_E_=BITRANGE(in,16+5,1); /* MUX UJ10 Enable */
-	uIW->M_UJ11_S10=BITRANGE(in,16+3,2); /* MUX UJ11 Source Select S0/S1 - Dynamic: S2=Flag_M(UJ9.Q2) */
-	uIW->M_UJ11_E_=BITRANGE(in,16+2,1); /* MUX UJ11 Enable */
-	uIW->M_UJ12_S10=BITRANGE(in,16+0,2); /* MUX UJ12 Source Select */
-	uIW->M_UJ13_S10=BITRANGE(in,16+4,2); /* MUX UJ13 Source Select */
-	uIW->M_UK9_S210=BITRANGE(in,16+0,3); /* MUX K9 Source Select */
-	uIW->M_UK9_E_=BITRANGE(in,47+0,1); /* MUX UK9 Enable: =LA<0> */
-	uIW->M_UK13_S10=BITRANGE(in,16+6,2); /* MUX UK13 Source Select */
-
 
 
 
@@ -460,6 +453,18 @@ void parse_uIW(uIW_t *uIW, uint64_t in) {
 	/* S1S0 = S2S0, S1S1 = S2S1 -> INV -> NAND S1S1_OVR_ */
 	/* S1S =    NAND( INV(S2S1),                 S1S1_OVR_<<1       ) OR     S1S0 */
 	uIW->S1S= ( (~( ((~uIW->S2S)&0x2) & (uIW->S1S1_OVR_<<1) ))&0x2) | ((uIW->S2S)&0x1) ;
+
+
+	/* Conditional MUX controls mostly overlap with uADDR range */
+	uIW->M_UJ10_S210=BITRANGE(in,16+6,3); /* MUX UJ10 Source Select */
+	uIW->M_UJ10_E_=BITRANGE(in,16+5,1); /* MUX UJ10 Enable */
+	uIW->M_UJ11_S10=BITRANGE(in,16+3,2); /* MUX UJ11 Source Select S0/S1 - Dynamic: S2=Flag_M(UJ9.Q2) */
+	uIW->M_UJ11_E_=BITRANGE(in,16+2,1); /* MUX UJ11 Enable */
+	uIW->M_UJ12_S10=BITRANGE(in,16+0,2); /* MUX UJ12 Source Select */
+	uIW->M_UJ13_S10=BITRANGE(in,16+4,2); /* MUX UJ13 Source Select */
+	uIW->M_UK9_S210=BITRANGE(in,16+0,3); /* MUX K9 Source Select */
+	uIW->M_UK9_E_=BITRANGE(in,47+0,1); /* MUX UK9 Enable: =LA<0> */
+	uIW->M_UK13_S10=BITRANGE(in,16+6,2); /* MUX UK13 Source Select */
 	
 }
 
@@ -1087,28 +1092,32 @@ int main(int argc, char **argv) {
 	if(argc > 1 ) { inject=argv+1; inject_size=argc-1; }
 	else { inject=inj_NOP; inject_size=1; }
 
-	if( (r=read_roms()) == 0 ) {
-		merge_roms();
+	//if( (r=read_roms()) == 0 ) {
+	//merge_roms();
 
-		init_cpu_state(&cpu_st);
-		uA=0x0; uAp=0;
-		for(int i=0; i<ROMSIZE; i++) {
-			//printf("\n%#06x: %#06x",i,allrom[0][i]);
-			//byte_bits_to_binary_string_grouped(binstr, allrom[0][i], NUMROMS*8, 1);
-			//printf("   %s",binstr);
-			//int64_bits_to_binary_string_grouped(binstr, iws[i], NUMROMS*8,4);
-			int64_bits_to_binary_string_fields(binstr, iws[uA], NUMROMS*8,
-				"\x1\1\1\x2\x4\x4\x3\x3\x3\x1\x2\x2\x2\x3\x4\x4\x1\x2\x3\x3\x3\x4");
-			printf("Cycle:%04u 0x%#03x: 0x%016"PRIx64" %s\n",i,uA,iws[uA],binstr);
-			//trace_uIW(&cpu_st, &trace[i],i,iws[i]);
-			trace[i].uADDR_Prev=uAp;
-			trace_uIW(&cpu_st, &trace[i],uA,iws[uA]);
-			print_uIW_trace(&trace[i]);
-			uAp=uA;
-			uA=trace[i].uADDR_Next;
-			//uA=i;
-		}
-	} else {
-		printf("Could not read ROMS!");
+	init_cpu_state(&cpu_st);
+	uA=0x0; uAp=0;
+	for(int i=0; i<ROMSIZE_uCode_rom; i++) {
+		//printf("\n%#06x: %#06x",i,allrom[0][i]);
+		//byte_bits_to_binary_string_grouped(binstr, allrom[0][i], NUMROMS*8, 1);
+		//printf("   %s",binstr);
+		//int64_bits_to_binary_string_grouped(binstr, iws[i], NUMROMS*8,4);
+		//int64_bits_to_binary_string_fields(binstr, iws[uA], NUMROMS*8,
+		//	"\x1\1\1\x2\x4\x4\x3\x3\x3\x1\x2\x2\x2\x3\x4\x4\x1\x2\x3\x3\x3\x4");
+		//printf("Cycle:%04u 0x%#03x: 0x%016"PRIx64" %s\n",i,uA,iws[uA],binstr);
+		int64_bits_to_binary_string_fields(binstr, uCode_rom[uA], ROMWIDTH_uCode_rom*8,
+			"\x1\1\1\x2\x4\x4\x3\x3\x3\x1\x2\x2\x2\x3\x4\x4\x1\x2\x3\x3\x3\x4");
+		printf("Cycle:%04u 0x%03x: 0x%016"PRIx64" %s\n",i,uA,uCode_rom[uA],binstr);
+		//trace_uIW(&cpu_st, &trace[i],i,iws[i]);
+		trace[i].uADDR_Prev=uAp;
+		trace_uIW(&cpu_st, &trace[i],uA,uCode_rom[uA]);
+		//trace_uIW(&cpu_st, &trace[i],uA,iws[uA]);
+		print_uIW_trace(&trace[i]);
+		uAp=uA;
+		uA=trace[i].uADDR_Next;
+		//uA=i;
 	}
+	//} else {
+	//	printf("Could not read ROMS!");
+	//}
 }
