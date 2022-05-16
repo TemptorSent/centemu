@@ -161,7 +161,7 @@ typedef struct uIW_t {
 	bit_t CASE_;
 
 	/* Sequencers */
-	twobit_t S0S, S1S, S2S;
+	twobit_t S0S, S1S, S2S; // These are inverted signals in the uIW
 	bit_t S1S1_OVR_;
 	bit_t PUP, FE_;
 	nibble_t Seq0Op, Seq1Op, Seq2Op;
@@ -198,6 +198,27 @@ typedef struct uIW_trace_t {
 	byte_t F;
 	byte_t R;
 	nibble_t RIR;
+	struct trALU {
+		byte_t RAM[0x10];
+		byte_t A,B,D,Q,F,Y;
+		bit_t Cin, Chalf, Cout;
+		bit_t RAM0, RAM3, RAM7;
+		bit_t Q0, Q3, Q7;
+		bit_t FZ, F3, F7;
+		bit_t P_0,G_0, P_1,G_1;
+		bit_t nibbleOVF, OVF;
+		bit_t OE_;
+	} ALU;
+	struct trSeq {
+		word_t STK[4]; /* Stack */
+		twobit_t SP[3]; /* Stack Pointer */
+		byte_t ORi; /* ORi Inputs for Seq{0,1} */
+		bit_t C[4]; /* [0]Carry in, [1]C4, [2]C8, [3]Carry out */
+		byte_t Ri; /* Ri Inputs for Seq{0,1} available to latch in AR with RE_=LO*/
+		byte_t AR; /* May be word, but Seq2 doesn't appear to ever use AR */
+		word_t Y; /* Output value (uPC) */
+		word_t incr; /* Incrementer value (Next uPC) */
+	} Seq;
 	
 } uIW_trace_t;
 
@@ -226,6 +247,7 @@ enum decoder_outputs {
 
 
 static char *decoded_sig[6][8][2] = {
+	/// D2 & D3 are DP-Bus Read Source Selects
 	{ // Decoder D2 -> latch UD4
 		{"D2.0 READ NIBBLE SWAP REGISTER -> (DP-Bus)",""}, // C12p1
 		{"D2.1 READ REGISTER FILE -> (DP-Bus)",""}, // D13p1
@@ -245,6 +267,7 @@ static char *decoded_sig[6][8][2] = {
 
 	},
 	{ // Decoder E6 (from latch E5)
+	  // F-Bus Writer Select
 		{"E6.0 IDLE STATE",""},
 		{"E6.1 WRITE RESULT REGISTER (R-Bus) <- (F-Bus)",""}, // C9p1
 		{"E6.2 WRITE REGISTER INDEX SELECTION REGISTER <- (F-Bus)",""}, // C13p1
@@ -256,7 +279,9 @@ static char *decoded_sig[6][8][2] = {
 		{"E6.7 (Load Condition Code Reg M12?)",""} // M12p1
 	},
 	{ // Decoder K11 & (K12C(NOR)/H13B(NAND4)) - Write Register File(0) and Clock output select (1-7)
-	  	// WRITE REGFILE NAND4[UH13B]( K11.A2[B] (NOR[UK12C](K11.A0,K11.A1)[C,D] ) -> UD14.WE_/UD15.WE_
+	  	// D.UH13B, UE5.Q5 -> A0.UK11, UJ4.Q7 -> A1.UK11, UJ4.Q6 -> A2.UK11 All LO to Enable RF Write
+		// WRITE REGFILE NAND4[UH13B]( K11.A2[B] (NOR[UK12C](K11.A0,K11.A1)[C,D] ) -> UD14.WE_/UD15.WE_
+		// 
 		// WRITE_RF logic tied to input signals of K11
 		{"K11.0 Write Register File <- (R-Bus)",""},
 		// All output signals clocked through inverting input to inverting outputs (Idle HI)
@@ -272,7 +297,7 @@ static char *decoded_sig[6][8][2] = {
 	{ // Decoder H11
 		{"H11.0",""},
 		{"H11.1",""},
-		{"H11.2",""},
+		{"H11.2 (?DBE_ and WTIN?)",""},
 		{"H11.3 WRITE WORKING ADDRESS REGISTER MSB <- (A-Bus/R-Bus)",""},
 		{"H11.4",""},
 		{"H11.5",""},
@@ -283,7 +308,7 @@ static char *decoded_sig[6][8][2] = {
 		{"E7.0",""},
 		{"E7.1 (E14 Clock enable?)",""},
 		{"E7.2 WRITE FLAG REGISTER",""},
-		{"E7.3",""},
+		{"E7.3 (ABE_? Bus Cycle Start?)",""},
 		{"",""},
 		{"",""},
 		{"",""},
@@ -612,6 +637,7 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 			e= (i<<4) | (j<<1) | ( (v&(1<<j))? 1:0);
 			switch(e) {
 				case D_D2_0_READ_NSWAPR:
+					if( !CLOCK_IS_LH(st->Clock.B2_.clk) ) { break; }
 					st->Bus.DP= st->Reg.NSWAPR;
 					deroach("Read 0x%02x from DP Nibble Swap Register to DP-Bus\n", st->Bus.DP);
 					break;
@@ -662,6 +688,7 @@ void do_read_sources(cpu_state_t *st, uIW_trace_t *t) {
 					deroach("Read 0x%02x from MAPROM address 0x%02x to F-Bus\n", st->Bus.F, st->Bus.DP);
 					break;
 				case D_H11_6_READ_ALU_RESULT:
+					if( !CLOCK_IS_LH(st->Clock.B2_.clk) ) { break; }
 					st->ALU.OE_=0;
 					deroach("Reading ALU Y outputs to F-Bus enabled\n");
 					break; 
@@ -698,7 +725,7 @@ void do_write_dests(cpu_state_t *st, uIW_trace_t *t) {
 					if( !CLOCK_IS_LH(st->Clock.B2_.clk) ) { break; }
 					st->Reg.RR=st->Bus.F;
 					st->Bus.R=st->Bus.F;
-					deroach("Wrote 0x%02x to Result Register (RR)\n", st->Reg.RR);
+					deroach("Wrote 0x%02x from F-Bus to Result Register (RR)\n", st->Reg.RR);
 					break;
 				case D_E6_2_WRITE_RIR:
 					if( !CLOCK_IS_LH(st->Clock.B2_.clk) ) { break; }
@@ -788,6 +815,7 @@ void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 
 
 	/* Transfer inputs from microinstruction word to Seq inputs - this could be done with pointer mods instead? */
+	// These signal inverted out of uIW, reinvert 
 	st->Seq.S0S= (~t->uIW->S0S)&0x3; // Seq0 Source for next uA
 	st->Seq.S1S= (~t->uIW->S1S)&0x3; // Seq1 Source for next uA
 	st->Seq.S2S= (~t->uIW->S2S)&0x3; // Seq2 Source for next uA
@@ -799,7 +827,7 @@ void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 	st->Seq.DiS1= (t->uIW->uADDR&0x0f0)>>4; // Seq1 Direct Data Input Di<7:4>
 	st->Seq.DiS2= (t->uIW->uADDR&0x700)>>8; // Seq2 Direct Data Input Di<11:8>
 	
-	printf("S0S=%0x  S1S=%0x  S2S=%0x\n",st->Seq.S0S, st->Seq.S1S, st->Seq.S2S);
+	//printf("S0S=%0x  S1S=%0x  S2S=%0x\n",st->Seq.S0S, st->Seq.S1S, st->Seq.S2S);
 
 	st->Seq.RiS0= (st->Bus.F&0x0f)>>0; // Seq0 uA Register Input Ri<3:0>
 	st->Seq.RiS1= (st->Bus.F&0xf0)>>4; // Seq1 uA Register Input Ri<7:4>
@@ -814,12 +842,42 @@ void uIW_trace_run_Seqs(cpu_state_t *st, uIW_trace_t *t ) {
 	} else { st->Seq.ORiS0=0; }
 
 	/* Run our sequencers */
+	if(CLOCK_IS_LH(st->Clock.B0_.clk)) { deroach("Sequencer state:\n"); }
 	am2909_update(&st->dev.Seq0);
 	am2909_update(&st->dev.Seq1);
 	am2911_update(&st->dev.Seq2);
 
-}
+	if(CLOCK_IS_LH(st->Clock.B0_.clk)) {
+		t->Seq.Y= (st->Seq.YS2<<8) | (st->Seq.YS1<<4) | (st->Seq.YS0<<0);
+		t->Seq.ORi= (st->Seq.ORiS1<<4) | (st->Seq.ORiS0<<0);
+		t->Seq.Ri= (st->Seq.RiS1<<4) | (st->Seq.RiS0<<0);
+		t->Seq.AR= (st->dev.Seq1.AR<<4) | (st->dev.Seq0.AR<<0);
+		t->Seq.C[0]= st->Seq.Cn;
+		t->Seq.C[1]= st->Seq.C4;
+		t->Seq.C[2]= st->Seq.C8;
+		t->Seq.C[3]= st->Seq.Co;
+		t->Seq.SP[0]=st->dev.Seq0.SP;
+		t->Seq.SP[1]=st->dev.Seq1.SP;
+		t->Seq.SP[2]=st->dev.Seq2.SP;
 
+		for(int sp=0; sp<4; sp++) {
+			t->Seq.STK[sp]= (st->dev.Seq2.STK[sp]<<8) | (st->dev.Seq1.STK[sp]<<4) | (st->dev.Seq0.STK[sp]<<0);
+		}
+		t->Seq.incr= (st->dev.Seq2.uPC<<8) | (st->dev.Seq1.uPC<<4) | (st->dev.Seq0.uPC<<0);
+		
+		if(t->uIW->D_E6==6) { deroach("\tLatching 0x%02x to AR from F-Bus\n", t->Seq.AR); }
+
+		deroach("\tSTK: ");
+		for(int sp=0; sp<4; sp++) {
+			deroach("  [%0u]=0x%03x",sp,t->Seq.STK[sp]);
+		}
+		deroach("   (SP: Seq0=%0u, Seq1=%0u, Seq2=%0u)\n", t->Seq.SP[0], t->Seq.SP[1], t->Seq.SP[2]);
+		deroach("\tRi=0x%02x, AR=0x%02x, ORi=0x%02x, ", t->Seq.Ri, t->Seq.AR, t->Seq.ORi);
+		deroach("Y=0x%03x, incr=0x%03x (Cin=%0u, C4=%0u, C8=%0u, Cout=%0u)\n",
+			t->Seq.Y, t->Seq.incr, t->Seq.C[0], t->Seq.C[1], t->Seq.C[2], t->Seq.C[3]);
+
+	}
+}
 void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 	
 	/* Transfer inputs from microinstruction word to ALU inputs - this could be done with pointer mods instead? */
@@ -859,11 +917,98 @@ void uIW_trace_run_ALUs(cpu_state_t *st, uIW_trace_t *t ) {
 		st->Bus.F= (((st->ALU.Fhigh&0x0f)<<4)&0xf0) | ((st->ALU.Flow<<0)&0x0f);
 	}
 
-	/* Clock.B1_=HI is the end of the cyle, print data here */
+	/* Clock.B1_=HI is the end of the cyle, store trace and print data here */
 	if(CLOCK_IS_LO(st->Clock.B1_.clk)) {
-		am2901_print_state(&st->dev.ALU0);
-		am2901_print_state(&st->dev.ALU1);
-		if(!st->ALU.OE_) { deroach("ALU is outputting Y=0x%02x to F-Bus\n", st->Bus.F); }
+		for(int a=0;a<0x10;a++) {
+			t->ALU.RAM[a]= (st->dev.ALU1.RAM[a]<<4) | (st->dev.ALU0.RAM[a]<<0);
+		}
+		
+		t->ALU.OE_=st->ALU.OE_;
+		t->ALU.F= (st->dev.ALU1.F<<4) | (st->dev.ALU0.F<<0);
+		t->ALU.Y= (st->ALU.Fhigh<<4) | (st->ALU.Flow<<0);
+		t->ALU.D= (st->ALU.Dhigh<<4) | (st->ALU.Dlow<<0);
+		t->ALU.A= (st->dev.ALU1.A<<4) | (st->dev.ALU0.A<<0);
+		t->ALU.B= (st->dev.ALU1.B<<4) | (st->dev.ALU0.B<<0);
+		t->ALU.Q= (st->dev.ALU1.Q<<4) | (st->dev.ALU0.Q<<0);
+		t->ALU.Cin= st->ALU.Cin;
+		t->ALU.Chalf= st->ALU.Chalf;
+		t->ALU.Cout= st->ALU.Cout;
+		t->ALU.Q0= st->ALU.Q0;
+		t->ALU.Q3= st->ALU.Q3;
+		t->ALU.Q7= st->ALU.RAM0Q7;
+		t->ALU.RAM0= st->ALU.RAM0Q7;
+		t->ALU.RAM3= st->ALU.RAM3;
+		t->ALU.RAM7= st->ALU.RAM7;
+		t->ALU.FZ= st->ALU.FZ;
+		t->ALU.F3= st->ALU.F3;
+		t->ALU.F7= st->ALU.F7;
+		t->ALU.OVF= st->ALU.OVF;
+		t->ALU.nibbleOVF= st->ALU.nibbleOVF;
+		bit_t nibbleOVF, OVF;
+		t->ALU.P_0= st->ALU.P_0;
+		t->ALU.P_1= st->ALU.P_1;
+		t->ALU.G_0= st->ALU.G_0;
+		t->ALU.G_1= st->ALU.G_1;
+
+
+		deroach("ALU State:\n");
+		deroach("\tRAM:");
+		for(int a=0;a<0x10;a++) {
+			deroach(" %x:0x%02x",a,t->ALU.RAM[a]);
+		}
+		deroach("\n\tRAM[0x%01x]: Write:%c Shift:%c  ALU1: RAM7(%c)=%0x, RAM3(%c)=%0x   ALU0: RAM3(%c)=%0x, RAM0(%c)=%0x\n",
+			t->uIW->LB,
+			am2901_destinations[t->uIW->I876][1]? 'Y':'N',
+			am2901_destinations[t->uIW->I876][2],
+			am2901_destinations[t->uIW->I876][4], t->ALU.RAM7,
+			am2901_destinations[t->uIW->I876][3], t->ALU.RAM3,
+			am2901_destinations[t->uIW->I876][4], t->ALU.RAM3,
+			am2901_destinations[t->uIW->I876][3], t->ALU.RAM0
+		);
+		deroach("\t       Q: Write:%c Shift:%c  ALU1:   Q7(%c)=%0x,   Q3(%c)=%0x   ALU0:   Q3(%c)=%0x,   Q0(%c)=%0x\n",
+			am2901_destinations[t->uIW->I876][5]? 'Y':'N',
+			am2901_destinations[t->uIW->I876][6],
+			am2901_destinations[t->uIW->I876][8], t->ALU.Q7,
+			am2901_destinations[t->uIW->I876][7], t->ALU.Q3,
+			am2901_destinations[t->uIW->I876][8], t->ALU.Q3,
+			am2901_destinations[t->uIW->I876][7], t->ALU.Q0
+		);
+		deroach("\tInputs: A_ADDR=0x%01x, B_ADDR=0x%01x, Di=0x%02x, Cin=%0x",
+				t->uIW->LA, t->uIW->LB, t->ALU.D, t->ALU.Cin );
+		deroach("\tInternal: A=0x%02x, B=0x%02x, Q=0x%02x\n",
+				t->ALU.A, t->ALU.B, t->ALU.Q );
+		deroach("\tOperation:  %s %s\t",
+			am2901_function_mnemonics[t->uIW->I543], am2901_source_operand_mnemonics[t->uIW->I210]);
+
+		am2901_print_function_replace_RSC(
+			am2901_function_symbol_reduced[t->ALU.Cin][
+				am2901_source_operands[t->uIW->I210][0]=='0'? 1 
+				: am2901_source_operands[t->uIW->I210][1]=='0'?2:0
+			][t->uIW->I543],
+			1,
+			am2901_source_operands[t->uIW->I210][0], 
+			am2901_source_operands[t->uIW->I210][1],
+			'C'
+		);
+		deroach("\t");
+		am2901_print_function_replace_RSC(
+			am2901_function_symbol_reduced[t->ALU.Cin][
+				am2901_source_operands[t->uIW->I210][0]=='0'? 1 
+				: am2901_source_operands[t->uIW->I210][1]=='0'?2:0
+			][t->uIW->I543],
+			0,
+			t->ALU.A, 
+			t->ALU.B,
+			1
+		);
+		deroach("\n");
+		deroach("\tResult: F=0x%02x, FZ(Zero):%01u, F3(nibbleSign):%01u, F7(Sign):%01u, nibbleOVF:%01u, OVF:%01u, ",
+			t->ALU.F, t->ALU.FZ, t->ALU.F3, t->ALU.F7, t->ALU.nibbleOVF, t->ALU.OVF);
+		deroach("Chalf:%0x, Cout:%0x\n", t->ALU.Chalf, t->ALU.Cout);
+		//am2901_print_state(&st->dev.ALU0);
+		//am2901_print_state(&st->dev.ALU1);
+		if(!st->ALU.OE_) { deroach("\tOE_=LO, Outputting Y=0x%02x to F-Bus\n", st->Bus.F); }
+		else { deroach("\tOE_=HI, Output Disabled\n"); }
 	}
 }
 
@@ -907,22 +1052,22 @@ void trace_uIW(cpu_state_t *st, uIW_trace_t *t, uint16_t addr, uint64_t in) {
 		t->DP=st->Bus.DP;
 		deroach("\nDP-Bus: 0x%02x\n",st->Bus.DP);
 
-		deroach("\nRunning ALUs:");
+		//deroach("\nRunning ALUs:");
 		uIW_trace_run_ALUs(st, t);
 		t->R= st->Bus.R;
 		t->F= st->Bus.F;
 		t->DP=st->Bus.DP;
 
-		deroach("\nUpdating conditional:\n");
+		//deroach("\nUpdating conditional:\n");
 		do_conditionals(st,t);
 
-		st->Bus.R= st->Reg.RR;
-		deroach("\nUpdated R-Bus from Result Register: 0x%02x\n", st->Bus.R);
+		//st->Bus.R= st->Reg.RR;
+		//deroach("\nUpdated R-Bus from Result Register: 0x%02x\n", st->Bus.R);
 
-		deroach("\nRunning SEQs:\n");
+		//deroach("\nRunning SEQs:\n");
 		uIW_trace_run_Seqs(st, t);
 
-		deroach("\nRunning WRITES:\n");
+		//deroach("\nRunning WRITES:\n");
 		do_write_dests(st, t);
 		t->R= st->Bus.R;
 		t->F= st->Bus.F;

@@ -42,6 +42,7 @@ CLK_? ->	I1b	-> CLK_UD6Zb "CEP_MAR"
 		I1d	-> CLK_UD6Zd "CEP_WAR"
 ! p1, p{2,11}, p{6,13} 
 ? p3,p5,p10,p14,p15 (may be unused, tied high/low)
+	? -> PE_.UC15 & A.UC10B.Y[INV] ->UD6.I1a
 
 
 # System Bus Signals
@@ -49,6 +50,10 @@ T8			DRDY	UA2C.Y -> T8 -> UA3B.A
 T{9,10,12,17,22,23,24,25}	ABT_{?,?,13,14,15,16,17}	
 T13-T16		INR_		UA7.I{2a,1a,0a,3a}
 T18-T21		CIL_
+T22		?		UC8A.Y[INV] -> T22
+T28		?		T28 -> AUA15F.Y[INV] -> A.UB11A.Y[NAND3] -> UB15p{2,12}
+T30		?		M13.Q7 ->A.UA14D.Y[NAND] -> T30
+
 
 # Bus connections
 uABus<0:10>->		U[EFHJKLM]3 A0-A10 p{8,7,6,5,4,3,2,1,23,22,21}

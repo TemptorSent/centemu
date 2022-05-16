@@ -128,3 +128,4 @@ int am2901_init(am2901_device_t *dev, char* id,
 
 char *am2901_update(am2901_device_t *dev);
 void am2901_print_state(am2901_device_t *dev);
+void am2901_print_function_replace_RSC(char *fstr, char sym, char R, char S, char C);
